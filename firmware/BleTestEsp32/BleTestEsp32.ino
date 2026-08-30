@@ -51,8 +51,10 @@ uint16_t currentRouteMtu() {
 uint16_t currentRoutePayloadSize() {
   uint16_t mtu = currentRouteMtu();
   uint16_t attPayloadSize = mtu > 3 ? mtu - 3 : 20;
-  return min((uint16_t)(ROUTE_FRAME_SIZE - ROUTE_FRAME_HEADER_SIZE),
-             attPayloadSize > ROUTE_FRAME_HEADER_SIZE ? (uint16_t)(attPayloadSize - ROUTE_FRAME_HEADER_SIZE) : 1);
+  uint16_t availablePayloadSize = attPayloadSize > ROUTE_FRAME_HEADER_SIZE
+                                      ? (uint16_t)(attPayloadSize - ROUTE_FRAME_HEADER_SIZE)
+                                      : (uint16_t)1;
+  return min((uint16_t)(ROUTE_FRAME_SIZE - ROUTE_FRAME_HEADER_SIZE), availablePayloadSize);
 }
 
 String makeRouteInfoJson() {
