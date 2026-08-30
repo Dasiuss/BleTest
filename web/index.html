@@ -40,6 +40,17 @@
           <button id="notifyButton" class="button button-secondary" disabled>Włącz powiadomienia</button>
           <button id="disconnectButton" class="button button-quiet" disabled>Rozłącz</button>
         </div>
+        <div class="interval-control">
+          <div>
+            <p class="control-label">CZĘSTOTLIWOŚĆ NOTIFY</p>
+            <p class="control-help">millis wysyła pakiet co wybraną liczbę sekund</p>
+          </div>
+          <div class="stepper" aria-label="Częstotliwość powiadomień">
+            <button id="decreaseIntervalButton" class="stepper-button" type="button" disabled aria-label="Zmniejsz interwał">−</button>
+            <output id="notifyIntervalValue" class="stepper-value">1 s</output>
+            <button id="increaseIntervalButton" class="stepper-button" type="button" disabled aria-label="Zwiększ interwał">+</button>
+          </div>
+        </div>
         <div class="connection-path" aria-label="Etapy połączenia">
           <span id="stepDevice" class="path-step">1. Urządzenie</span>
           <span class="path-arrow">›</span>
@@ -49,6 +60,37 @@
           <span class="path-arrow">›</span>
           <span id="stepData" class="path-step">4. Dane</span>
         </div>
+      </section>
+
+      <section class="panel lab-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">LABORATORIUM GATT</p>
+            <h2>Dodatkowe charakterystyki</h2>
+          </div>
+          <span class="protocol-chip">READ / WRITE</span>
+        </div>
+        <div class="characteristic-list">
+          <div class="characteristic-row">
+            <div>
+              <strong>random</strong>
+              <span>READ · losowa liczba w JSON</span>
+            </div>
+            <button id="randomReadButton" class="button button-secondary" disabled>Pobierz random</button>
+          </div>
+          <div class="characteristic-row">
+            <div>
+              <strong>counter</strong>
+              <span>READ + WRITE · kolejny int</span>
+            </div>
+            <div class="counter-controls">
+              <input id="counterInput" class="number-input" type="number" step="1" value="0" aria-label="Wartość counter">
+              <button id="counterReadButton" class="button button-secondary" disabled>READ</button>
+              <button id="counterWriteButton" class="button button-secondary" disabled>WRITE</button>
+            </div>
+          </div>
+        </div>
+        <pre id="auxiliaryOutput" class="json-output">Brak odczytów dodatkowych charakterystyk...</pre>
       </section>
 
       <section class="metrics-grid">

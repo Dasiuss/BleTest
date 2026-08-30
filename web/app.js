@@ -1,5 +1,8 @@
 const SERVICE_UUID = "7e6d0001-7b9e-4f5b-a6c2-320000000001";
 const MILLIS_CHARACTERISTIC_UUID = "7e6d0002-7b9e-4f5b-a6c2-320000000002";
+const RANDOM_CHARACTERISTIC_UUID = "7e6d0003-7b9e-4f5b-a6c2-320000000003";
+const COUNTER_CHARACTERISTIC_UUID = "7e6d0004-7b9e-4f5b-a6c2-320000000004";
+const NOTIFY_INTERVAL_CHARACTERISTIC_UUID = "7e6d0005-7b9e-4f5b-a6c2-320000000005";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -10,6 +13,9 @@ const els = {
   readButton: $("readButton"),
   notifyButton: $("notifyButton"),
   disconnectButton: $("disconnectButton"),
+  decreaseIntervalButton: $("decreaseIntervalButton"),
+  increaseIntervalButton: $("increaseIntervalButton"),
+  notifyIntervalValue: $("notifyIntervalValue"),
   millisValue: $("millisValue"),
   millisTime: $("millisTime"),
   readCount: $("readCount"),
@@ -17,6 +23,11 @@ const els = {
   jsonOutput: $("jsonOutput"),
   dataOrigin: $("dataOrigin"),
   deviceName: $("deviceName"),
+  randomReadButton: $("randomReadButton"),
+  counterReadButton: $("counterReadButton"),
+  counterWriteButton: $("counterWriteButton"),
+  counterInput: $("counterInput"),
+  auxiliaryOutput: $("auxiliaryOutput"),
   eventLog: $("eventLog"),
   clearLogButton: $("clearLogButton"),
   steps: [$("stepDevice"), $("stepService"), $("stepCharacteristic"), $("stepData")],
@@ -24,9 +35,13 @@ const els = {
 
 let device = null;
 let characteristic = null;
+let randomCharacteristic = null;
+let counterCharacteristic = null;
+let notifyIntervalCharacteristic = null;
 let readTotal = 0;
 let notificationTotal = 0;
 let notificationsEnabled = false;
+let notifyIntervalSeconds = 1;
 
 function log(message, type = "") {
   const entry = document.createElement("div");
@@ -58,12 +73,39 @@ function setControls(connected) {
   els.readButton.disabled = !connected;
   els.notifyButton.disabled = !connected;
   els.disconnectButton.disabled = !connected;
+  els.randomReadButton.disabled = !connected;
+  els.counterReadButton.disabled = !connected;
+  els.counterWriteButton.disabled = !connected;
+  els.decreaseIntervalButton.disabled = !connected || notifyIntervalSeconds <= 1;
+  els.increaseIntervalButton.disabled = !connected || notifyIntervalSeconds >= 60;
   els.notifyButton.textContent = notificationsEnabled ? "Wyłącz powiadomienia" : "Włącz powiadomienia";
 }
 
 function decodeValue(dataView) {
   const bytes = new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength);
   return new TextDecoder().decode(bytes);
+}
+
+function characteristicProperties(remoteCharacteristic) {
+  const properties = [
+    ["read", "READ"],
+    ["write", "WRITE"],
+    ["writeWithoutResponse", "WRITE WITHOUT RESPONSE"],
+    ["notify", "NOTIFY"],
+    ["indicate", "INDICATE"],
+  ];
+  return properties.filter(([key]) => remoteCharacteristic.properties[key]).map(([, label]) => label).join(" + ");
+}
+
+function displayAuxiliary(raw, origin) {
+  let value = raw;
+  try {
+    value = JSON.parse(raw);
+  } catch (error) {
+    // Counter returns a plain integer instead of JSON.
+  }
+  els.auxiliaryOutput.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  log(`${origin}: ${raw}`, "data");
 }
 
 function displayData(raw, origin) {
@@ -106,6 +148,68 @@ async function readMillis() {
   } catch (error) {
     log(`READ nie powiódł się: ${error.message}`, "error");
   }
+}
+
+async function readRandom() {
+  if (!randomCharacteristic) return;
+  try {
+    log("Odczyt READ random...");
+    const value = await randomCharacteristic.readValue();
+    displayAuxiliary(decodeValue(value), "READ random");
+    log("Odczyt READ random zakończony", "success");
+  } catch (error) {
+    log(`READ random nie powiódł się: ${error.message}`, "error");
+  }
+}
+
+async function readCounter() {
+  if (!counterCharacteristic) return;
+  try {
+    log("Odczyt READ counter...");
+    const value = await counterCharacteristic.readValue();
+    const raw = decodeValue(value);
+    els.counterInput.value = raw;
+    displayAuxiliary(raw, "READ counter");
+    log("Odczyt READ counter zakończony", "success");
+  } catch (error) {
+    log(`READ counter nie powiódł się: ${error.message}`, "error");
+  }
+}
+
+async function writeCounter() {
+  if (!counterCharacteristic) return;
+  const value = els.counterInput.value.trim();
+  if (!/^-?\d+$/.test(value)) {
+    log("WRITE counter wymaga liczby całkowitej", "error");
+    return;
+  }
+
+  try {
+    log(`Zapis WRITE counter = ${value}...`);
+    await counterCharacteristic.writeValue(new TextEncoder().encode(value));
+    log(`WRITE counter zakończony: ${value}`, "success");
+  } catch (error) {
+    log(`WRITE counter nie powiódł się: ${error.message}`, "error");
+  }
+}
+
+async function writeNotifyInterval() {
+  if (!notifyIntervalCharacteristic) return;
+  try {
+    const value = String(notifyIntervalSeconds);
+    log(`Zapis WRITE notify interval = ${value} s...`);
+    await notifyIntervalCharacteristic.writeValue(new TextEncoder().encode(value));
+    log(`Interwał NOTIFY ustawiony na ${value} s`, "success");
+  } catch (error) {
+    log(`WRITE notify interval nie powiódł się: ${error.message}`, "error");
+  }
+}
+
+function changeNotifyInterval(delta) {
+  notifyIntervalSeconds = Math.min(60, Math.max(1, notifyIntervalSeconds + delta));
+  els.notifyIntervalValue.textContent = `${notifyIntervalSeconds} s`;
+  setControls(Boolean(characteristic));
+  void writeNotifyInterval();
 }
 
 async function toggleNotifications() {
@@ -152,18 +256,23 @@ async function connect() {
     log("Połączono z serwerem GATT", "success");
     const service = await server.getPrimaryService(SERVICE_UUID);
     setStep(1);
-    log("Znaleziono usługę GATT", "success");
+    log(`Discovery: usługa GATT ${service.uuid}`, "success");
+    const discoveredCharacteristics = await service.getCharacteristics();
+    log(`Discovery: znaleziono ${discoveredCharacteristics.length} charakterystyk`);
+    discoveredCharacteristics.forEach((remoteCharacteristic) => {
+      log(`Discovery: ${remoteCharacteristic.uuid} [${characteristicProperties(remoteCharacteristic)}]`);
+    });
+
     characteristic = await service.getCharacteristic(MILLIS_CHARACTERISTIC_UUID);
+    randomCharacteristic = await service.getCharacteristic(RANDOM_CHARACTERISTIC_UUID);
+    counterCharacteristic = await service.getCharacteristic(COUNTER_CHARACTERISTIC_UUID);
+    notifyIntervalCharacteristic = await service.getCharacteristic(NOTIFY_INTERVAL_CHARACTERISTIC_UUID);
     setStep(2);
     characteristic.addEventListener("characteristicvaluechanged", handleNotification);
     setConnection("connected", "Połączono");
     setControls(true);
-    log("Znaleziono charakterystykę millis (READ + NOTIFY)", "success");
-
-    await characteristic.startNotifications();
-    notificationsEnabled = true;
-    setControls(true);
-    log("Powiadomienia NOTIFY włączone automatycznie", "success");
+    log("Znaleziono charakterystyki millis, random, counter i notify interval", "success");
+    log("NOTIFY pozostaje wyłączone do ręcznego włączenia");
     await readMillis();
   } catch (error) {
     log(`Połączenie nie powiodło się: ${error.message}`, "error");
@@ -173,7 +282,11 @@ async function connect() {
 }
 
 function cleanupConnection() {
+  if (characteristic) characteristic.removeEventListener("characteristicvaluechanged", handleNotification);
   characteristic = null;
+  randomCharacteristic = null;
+  counterCharacteristic = null;
+  notifyIntervalCharacteristic = null;
   notificationsEnabled = false;
   setControls(false);
   resetSteps();
@@ -201,6 +314,11 @@ els.connectButton.addEventListener("click", connect);
 els.readButton.addEventListener("click", readMillis);
 els.notifyButton.addEventListener("click", toggleNotifications);
 els.disconnectButton.addEventListener("click", disconnect);
+els.decreaseIntervalButton.addEventListener("click", () => changeNotifyInterval(-1));
+els.increaseIntervalButton.addEventListener("click", () => changeNotifyInterval(1));
+els.randomReadButton.addEventListener("click", readRandom);
+els.counterReadButton.addEventListener("click", readCounter);
+els.counterWriteButton.addEventListener("click", writeCounter);
 els.clearLogButton.addEventListener("click", () => { els.eventLog.replaceChildren(); });
 
 if (!navigator.bluetooth) els.browserWarning.hidden = false;
