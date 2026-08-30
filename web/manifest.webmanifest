@@ -1,7 +1,7 @@
 {
-  "name": "BLE Test Console",
-  "short_name": "BLE Test",
-  "description": "Test komunikacji BLE z ESP32-S3",
+  "name": "BLE GPS Transfer Test",
+  "short_name": "GPS Transfer",
+  "description": "Pomiar transferu archiwalnej trasy GPS przez BLE",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -76,6 +76,16 @@ h2 { font-size: 21px; letter-spacing: -.02em; margin-bottom: 0; }
 .path-arrow { color: #596982; font-size: 18px; }
 
 .lab-panel { margin-top: 13px; }
+.route-panel { margin-top: 13px; }
+.route-help, .route-meta { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.route-help { margin: -8px 0 17px; }
+.route-meta { border-top: 1px solid var(--line); margin: 20px 0 0; padding-top: 15px; }
+.route-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0; }
+.route-stats div { background: #0b111d; border: 1px solid #202b3d; border-radius: 8px; padding: 12px; }
+.route-stats span, .route-stats strong { display: block; }
+.route-stats span { color: var(--muted); font-size: 10px; margin-bottom: 7px; text-transform: uppercase; }
+.route-stats strong { color: var(--cyan); font: 12px Consolas, monospace; overflow-wrap: anywhere; }
+.button[hidden] { display: none; }
 .characteristic-list { border-top: 1px solid var(--line); }
 .characteristic-row { align-items: center; border-bottom: 1px solid var(--line); display: flex; gap: 18px; justify-content: space-between; padding: 15px 0; }
 .characteristic-row strong { display: block; font-family: Consolas, monospace; font-size: 14px; margin-bottom: 4px; }
@@ -114,6 +124,7 @@ footer { color: #536078; display: flex; font-size: 11px; justify-content: space-
   .hero { flex-direction: column; margin-bottom: 25px; }
   .panel { padding: 19px; }
   .metrics-grid, .details-grid { grid-template-columns: 1fr; }
+  .route-stats { grid-template-columns: 1fr; }
   .metric-card { min-height: 122px; }
   .metric-value { margin-top: 14px; }
   .interval-control { align-items: flex-start; flex-direction: column; }

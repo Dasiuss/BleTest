@@ -4,19 +4,19 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#0b1220">
-    <meta name="description" content="Test komunikacji BLE z ESP32-S3">
+    <meta name="description" content="Pomiar transferu archiwalnej trasy GPS przez BLE z ESP32-S3">
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="icon" href="./icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="./styles.css">
-    <title>BLE Test Console</title>
+    <title>BLE GPS Transfer Test</title>
   </head>
   <body>
     <main class="shell">
       <header class="hero">
         <div>
           <p class="eyebrow">ESP32-S3 / WEB BLUETOOTH</p>
-          <h1>BLE Test Console</h1>
-          <p class="intro">Połącz telefon z <strong>BleTestEsp32</strong>, odczytaj licznik MCU i obserwuj powiadomienia na żywo.</p>
+          <h1>GPS Transfer Test</h1>
+          <p class="intro">Zmierz, jak szybko urządzenie skompresuje i prześle archiwalną trasę GPS przez serię pojedynczych odczytów BLE.</p>
         </div>
         <div id="connectionBadge" class="badge badge-idle"><span class="badge-dot"></span><span id="connectionText">Rozłączono</span></div>
       </header>
@@ -29,120 +29,54 @@
       <section class="control-panel panel">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">STEROWANIE</p>
-            <h2>Połączenie GATT</h2>
+            <p class="eyebrow">POŁĄCZENIE</p>
+            <h2>Urządzenie BLE</h2>
           </div>
-          <span class="protocol-chip">READ + NOTIFY</span>
+          <span class="protocol-chip">READ ONLY TEST</span>
         </div>
         <div class="controls">
-          <button id="connectButton" class="button button-primary">Połącz i pobierz</button>
-          <button id="readButton" class="button button-secondary" disabled>Pobierz millis()</button>
-          <button id="notifyButton" class="button button-secondary" disabled>Włącz powiadomienia</button>
+          <button id="connectButton" class="button button-primary">Połącz urządzenie</button>
           <button id="disconnectButton" class="button button-quiet" disabled>Rozłącz</button>
         </div>
-        <div class="interval-control">
-          <div>
-            <p class="control-label">CZĘSTOTLIWOŚĆ NOTIFY</p>
-            <p class="control-help">millis wysyła pakiet co wybraną liczbę sekund</p>
-          </div>
-          <div class="stepper" aria-label="Częstotliwość powiadomień">
-            <button id="decreaseIntervalButton" class="stepper-button" type="button" disabled aria-label="Zmniejsz interwał">−</button>
-            <output id="notifyIntervalValue" class="stepper-value">1 s</output>
-            <button id="increaseIntervalButton" class="stepper-button" type="button" disabled aria-label="Zwiększ interwał">+</button>
-          </div>
-        </div>
-        <div class="connection-path" aria-label="Etapy połączenia">
-          <span id="stepDevice" class="path-step">1. Urządzenie</span>
-          <span class="path-arrow">›</span>
-          <span id="stepService" class="path-step">2. Usługa</span>
-          <span class="path-arrow">›</span>
-          <span id="stepCharacteristic" class="path-step">3. Charakterystyka</span>
-          <span class="path-arrow">›</span>
-          <span id="stepData" class="path-step">4. Dane</span>
-        </div>
       </section>
 
-      <section class="panel lab-panel">
+      <section class="panel route-panel">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">LABORATORIUM GATT</p>
-            <h2>Dodatkowe charakterystyki</h2>
+            <p class="eyebrow">TEST TRANSFERU</p>
+            <h2>Archiwalna trasa GPS</h2>
           </div>
-          <span class="protocol-chip">READ / WRITE</span>
+          <span class="protocol-chip">READ · ZLIB</span>
         </div>
-        <div class="characteristic-list">
-          <div class="characteristic-row">
-            <div>
-              <strong>random</strong>
-              <span>READ · losowa liczba w JSON</span>
-            </div>
-            <button id="randomReadButton" class="button button-secondary" disabled>Pobierz random</button>
-          </div>
-          <div class="characteristic-row">
-            <div>
-              <strong>counter</strong>
-              <span>READ + WRITE · kolejny int</span>
-            </div>
-            <div class="counter-controls">
-              <input id="counterInput" class="number-input" type="number" step="1" value="0" aria-label="Wartość counter">
-              <button id="counterReadButton" class="button button-secondary" disabled>READ</button>
-              <button id="counterWriteButton" class="button button-secondary" disabled>WRITE</button>
-            </div>
-          </div>
+        <p class="route-help">ESP32 przechowuje surowy CSV i kompresuje go podczas odczytu standardowym zlib/DEFLATE przez miniz. PWA wykonuje kolejne pojedyncze READ.</p>
+        <div class="controls">
+          <button id="routeStartButton" class="button button-primary" disabled>Pobierz trasę</button>
+          <button id="routeStopButton" class="button button-quiet" disabled>Zatrzymaj</button>
+          <a id="routeDownloadLink" class="button button-secondary" hidden download="route-gps.csv.zlib">Pobierz zlib</a>
         </div>
-        <pre id="auxiliaryOutput" class="json-output">Brak odczytów dodatkowych charakterystyk...</pre>
+        <p id="routeInfo" class="route-meta">Połącz urządzenie, aby pobrać informacje o trasie.</p>
+        <div class="route-stats">
+          <div><span>Status</span><strong id="routeStatus">---</strong></div>
+          <div><span>Odebrano</span><strong id="routeReceived">---</strong></div>
+          <div><span>Transfer</span><strong id="routeRate">---</strong></div>
+        </div>
+        <pre id="routeOutput" class="json-output">Brak testu transferu.</pre>
       </section>
 
-      <section class="metrics-grid">
-        <article class="metric-card metric-featured">
-          <div class="metric-label">AKTUALNY MILLIS()</div>
-          <div id="millisValue" class="metric-value">---</div>
-          <div id="millisTime" class="metric-footnote">Brak danych</div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-label">ODCZYTY READ</div>
-          <div id="readCount" class="metric-value metric-small">0</div>
-          <div class="metric-footnote">Pobrania na żądanie</div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-label">POWIADOMIENIA</div>
-          <div id="notifyCount" class="metric-value metric-small">0</div>
-          <div class="metric-footnote">Automatycznie co ~1 s</div>
-        </article>
-      </section>
-
-      <section class="details-grid">
-        <article class="panel data-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">OSTATNI PAKIET</p>
-              <h2>Dane z ESP32</h2>
-            </div>
-            <span id="dataOrigin" class="origin-chip">---</span>
+      <section class="panel log-panel standalone-log">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">DIAGNOSTYKA</p>
+            <h2>Dziennik zdarzeń</h2>
           </div>
-          <pre id="jsonOutput" class="json-output">Czekam na połączenie...</pre>
-          <dl class="info-list">
-            <div><dt>Urządzenie</dt><dd id="deviceName">---</dd></div>
-            <div><dt>UUID usługi</dt><dd>7e6d...0001</dd></div>
-            <div><dt>UUID charakterystyki</dt><dd>7e6d...0002</dd></div>
-          </dl>
-        </article>
-
-        <article class="panel log-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">DIAGNOSTYKA</p>
-              <h2>Dziennik zdarzeń</h2>
-            </div>
-            <button id="clearLogButton" class="text-button">Wyczyść</button>
-          </div>
-          <div id="eventLog" class="event-log" role="log" aria-live="polite"></div>
-        </article>
+          <button id="clearLogButton" class="text-button">Wyczyść</button>
+        </div>
+        <div id="eventLog" class="event-log" role="log" aria-live="polite"></div>
       </section>
 
       <footer>
         <span>BleTestEsp32</span>
-        <span>GATT service · characteristic · notifications</span>
+        <span>GATT route info · control · data</span>
       </footer>
     </main>
     <script type="module" src="./app.js"></script>
