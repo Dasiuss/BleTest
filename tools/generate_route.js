@@ -14,7 +14,7 @@ const pathFor = (name, fallback) => {
   return index === -1 ? fallback : args[index + 1];
 };
 
-const durationSeconds = valueFor("--duration-seconds", 7200);
+const durationSeconds = valueFor("--duration-seconds", 300);
 const frequencyHz = valueFor("--frequency-hz", 10);
 const headerOutput = pathFor("--header-output", "firmware/BleTestEsp32/route_data.h");
 const rawOutput = pathFor("--raw-output", "route_gps.csv");

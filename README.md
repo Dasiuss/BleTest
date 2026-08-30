@@ -57,7 +57,7 @@ Generator wymaga tylko Node.js:
 node tools/generate_route.js
 ```
 
-Domyślnie tworzy 72 000 punktów, czyli 2 godziny przy 10 Hz. Aktualizuje `firmware/BleTestEsp32/route_data.h` i tworzy `route_gps.csv` do porównania. Krótszy test można wygenerować tak:
+Domyślnie tworzy 3 000 punktów, czyli 5 minut przy 10 Hz, aby zmieścić próbkę razem z firmware w typowej pamięci programu ESP32. Aktualizuje `firmware/BleTestEsp32/route_data.h` i tworzy `route_gps.csv` do porównania. Krótszy lub dłuższy test można wygenerować tak:
 
 ```text
 node tools/generate_route.js --duration-seconds 60 --frequency-hz 10
