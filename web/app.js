@@ -98,6 +98,19 @@ async function waitForRouteCompression() {
   throw new Error("Timeout oczekiwania na kompresję trasy");
 }
 
+async function readRouteChunk() {
+  while (true) {
+    const value = await routeDataCharacteristic.readValue();
+    const chunk = new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice();
+    if (chunk.byteLength > 0) return chunk;
+
+    routeInfo = JSON.parse(decodeValue(await routeInfoCharacteristic.readValue()));
+    if (routeInfo.error) throw new Error("ESP32 nie zdołał skompresować trasy");
+    if (routeInfo.done) return null;
+    await sleep(10);
+  }
+}
+
 async function finishRouteTransfer() {
   const elapsed = (performance.now() - routeStartedAt) / 1000;
   const compressedBlob = new Blob(routeChunks, { type: "application/zlib" });
@@ -149,9 +162,8 @@ async function transferRoute() {
     await routeControlCharacteristic.writeValue(new TextEncoder().encode("START"));
     await waitForRouteCompression();
     while (true) {
-      const value = await routeDataCharacteristic.readValue();
-      const chunk = new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice();
-      if (chunk.byteLength === 0) break;
+      const chunk = await readRouteChunk();
+      if (chunk === null) break;
       routeChunks.push(chunk);
       routeReceivedBytes += chunk.byteLength;
       routeReadCount += 1;
