@@ -53,6 +53,7 @@ let routeDecodedPointCount = 0;
 let routePreviousTimestamp = 0;
 let routePreviousLatitude = 0;
 let routePreviousLongitude = 0;
+let routePendingOutput = [];
 
 function log(message, type = "") {
   const entry = document.createElement("div");
@@ -121,6 +122,19 @@ function persistRouteOutput(text) {
   updateRouteCrc32(bytes);
   routeOutputBytes += bytes.byteLength;
   routeLineCount += 1;
+  routePendingOutput.push(bytes);
+}
+
+function flushRouteOutput() {
+  if (routePendingOutput.length === 0) return;
+  const size = routePendingOutput.reduce((total, bytes) => total + bytes.byteLength, 0);
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const part of routePendingOutput) {
+    bytes.set(part, offset);
+    offset += part.byteLength;
+  }
+  routePendingOutput = [];
   if (routeFileWriter) {
     routeStorageChain = routeStorageChain.then(() => routeFileWriter.write(bytes));
   } else {
@@ -262,8 +276,12 @@ function handleRouteNotification(event) {
       return;
     }
   }
+  const requiresAcknowledgement = finalFrame || routeExpectedSequence % routeInfo.window_chunks === 0;
+  if (requiresAcknowledgement) {
+    flushRouteOutput();
+  }
   const persisted = routeStorageChain;
-  if (finalFrame || routeExpectedSequence % routeInfo.window_chunks === 0) {
+  if (requiresAcknowledgement) {
     acknowledgeRouteSequence(routeExpectedSequence, finalFrame, persisted);
   }
 }
@@ -332,6 +350,7 @@ async function transferRoute() {
   routePreviousTimestamp = 0;
   routePreviousLatitude = 0;
   routePreviousLongitude = 0;
+  routePendingOutput = [];
   routeStartedAt = performance.now();
   routeTransferring = true;
   routeStopRequested = false;
