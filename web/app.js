@@ -29,6 +29,7 @@ let routeDataCharacteristic = null;
 let routeInfo = null;
 let routeChunks = [];
 let routeReceivedBytes = 0;
+let routeOutputBytes = 0;
 let routeFrameCount = 0;
 let routeExpectedSequence = 0;
 let routeRecoveryPending = false;
@@ -45,6 +46,13 @@ let routeStorageChain = Promise.resolve();
 let routeFileHandle = null;
 let routeFileWriter = null;
 let routeLineCount = 0;
+let routeDecoder = null;
+let routeEncodedTextBuffer = "";
+let routeHeaderDecoded = false;
+let routeDecodedPointCount = 0;
+let routePreviousTimestamp = 0;
+let routePreviousLatitude = 0;
+let routePreviousLongitude = 0;
 
 function log(message, type = "") {
   const entry = document.createElement("div");
@@ -91,7 +99,7 @@ function characteristicProperties(characteristic) {
 function updateRouteProgress() {
   const elapsed = routeStartedAt ? (performance.now() - routeStartedAt) / 1000 : 0;
   const rate = elapsed > 0 ? routeReceivedBytes / elapsed : 0;
-  els.routeReceived.textContent = `${formatBytes(routeReceivedBytes)} · ${routeFrameCount.toLocaleString("pl-PL")} NOTIFY`;
+  els.routeReceived.textContent = `${formatBytes(routeOutputBytes)} CSV · ${routeFrameCount.toLocaleString("pl-PL")} NOTIFY`;
   els.routeRate.textContent = elapsed > 0 ? `${formatBytes(rate)}/s · ${(rate * 8 / 1000).toFixed(1)} kbit/s` : "---";
 }
 
@@ -105,6 +113,67 @@ function updateRouteCrc32(bytes) {
     for (let bit = 0; bit < 8; bit += 1) {
       routeCrc32 = (routeCrc32 >>> 1) ^ (0xEDB88320 & -(routeCrc32 & 1));
     }
+  }
+}
+
+function persistRouteOutput(text) {
+  const bytes = new TextEncoder().encode(text);
+  updateRouteCrc32(bytes);
+  routeOutputBytes += bytes.byteLength;
+  routeLineCount += 1;
+  if (routeFileWriter) {
+    routeStorageChain = routeStorageChain.then(() => routeFileWriter.write(bytes));
+  } else {
+    routeChunks.push(bytes);
+  }
+}
+
+function decodeRouteLine(line) {
+  if (!routeHeaderDecoded) {
+    if (line !== "t_ms,latitude,longitude") throw new Error("Nieprawidłowy nagłówek delta trasy");
+    routeHeaderDecoded = true;
+    persistRouteOutput(`${line}\n`);
+    return;
+  }
+
+  const fields = line.split(",");
+  if (fields.length !== 3) throw new Error("Nieprawidłowy rekord delta trasy");
+  const values = fields.map(Number);
+  if (values.some((value) => !Number.isInteger(value) || !Number.isFinite(value))) {
+    throw new Error("Nieprawidłowa wartość delta trasy");
+  }
+
+  if (routeDecodedPointCount === 0) {
+    [routePreviousTimestamp, routePreviousLatitude, routePreviousLongitude] = values;
+  } else {
+    routePreviousTimestamp += values[0];
+    routePreviousLatitude += values[1];
+    routePreviousLongitude += values[2];
+  }
+
+  persistRouteOutput(`${routePreviousTimestamp},${(routePreviousLatitude / 1e6).toFixed(6)},${(routePreviousLongitude / 1e6).toFixed(6)}\n`);
+  routeDecodedPointCount += 1;
+}
+
+function decodeRoutePayload(payload) {
+  routeEncodedTextBuffer += routeDecoder.decode(payload, { stream: true });
+  let newlineIndex = routeEncodedTextBuffer.indexOf("\n");
+  while (newlineIndex !== -1) {
+    const line = routeEncodedTextBuffer.slice(0, newlineIndex).replace(/\r$/, "");
+    routeEncodedTextBuffer = routeEncodedTextBuffer.slice(newlineIndex + 1);
+    decodeRouteLine(line);
+    newlineIndex = routeEncodedTextBuffer.indexOf("\n");
+  }
+}
+
+function finishRouteDecoder() {
+  routeEncodedTextBuffer += routeDecoder.decode();
+  if (routeEncodedTextBuffer.length > 0) {
+    decodeRouteLine(routeEncodedTextBuffer.replace(/\r$/, ""));
+    routeEncodedTextBuffer = "";
+  }
+  if (!routeHeaderDecoded || routeDecodedPointCount !== routeInfo.points) {
+    throw new Error("Nieprawidłowa liczba punktów delta trasy");
   }
 }
 
@@ -168,22 +237,30 @@ function handleRouteNotification(event) {
 
   routeRecoveryPending = false;
   const payload = new Uint8Array(value.buffer, value.byteOffset + 4, value.byteLength - 4).slice();
-  if (payload.byteLength > routeInfo.chunk_bytes || routeReceivedBytes + payload.byteLength > routeInfo.raw_bytes) {
+  if (payload.byteLength > routeInfo.chunk_bytes || routeReceivedBytes + payload.byteLength > routeInfo.encoded_bytes) {
     rejectRouteTransfer(new Error("Nieprawidłowy rozmiar fragmentu trasy"));
     return;
   }
 
-  if (!routeFileWriter) routeChunks.push(payload);
-  updateRouteCrc32(payload);
-  routeLineCount += new TextDecoder().decode(payload).split("\n").length - 1;
   routeReceivedBytes += payload.byteLength;
   routeFrameCount += 1;
+  try {
+    decodeRoutePayload(payload);
+  } catch (error) {
+    rejectRouteTransfer(error);
+    return;
+  }
   routeExpectedSequence += 1;
   updateRouteProgress();
 
-  const finalFrame = routeReceivedBytes === routeInfo.raw_bytes;
-  if (routeFileWriter) {
-    routeStorageChain = routeStorageChain.then(() => routeFileWriter.write(payload));
+  const finalFrame = routeReceivedBytes === routeInfo.encoded_bytes;
+  if (finalFrame) {
+    try {
+      finishRouteDecoder();
+    } catch (error) {
+      rejectRouteTransfer(error);
+      return;
+    }
   }
   const persisted = routeStorageChain;
   if (finalFrame || routeExpectedSequence % routeInfo.window_chunks === 0) {
@@ -221,15 +298,16 @@ async function finishRouteTransfer() {
   routeDownloadUrl = URL.createObjectURL(routeBlob);
   els.routeDownloadLink.href = routeDownloadUrl;
   els.routeDownloadLink.hidden = false;
-  els.routeDownloadLink.textContent = `Pobierz CSV (${formatBytes(routeReceivedBytes)})`;
+  els.routeDownloadLink.textContent = `Pobierz CSV (${formatBytes(rawBytes)})`;
   els.routeStatus.textContent = `OK · ${elapsed.toFixed(2)} s`;
   els.routeOutput.textContent = [
     `Punkty: ${routeInfo.points.toLocaleString("pl-PL")}`,
     `Pakiety NOTIFY: ${routeFrameCount.toLocaleString("pl-PL")}`,
     `CRC32: ${receivedCrc32}`,
+    `Delta wire: ${formatBytes(routeReceivedBytes)}`,
     `Surowy CSV: ${formatBytes(rawBytes)}`,
-    `CSV: ${formatBytes(routeReceivedBytes)}`,
-    `Transfer CSV: ${formatBytes(routeReceivedBytes / elapsed)}/s · ${(routeReceivedBytes * 8 / elapsed / 1000).toFixed(1)} kbit/s`,
+    `Redukcja: ${(routeInfo.raw_bytes / routeInfo.encoded_bytes).toFixed(2)}x`,
+    `Transfer delta: ${formatBytes(routeReceivedBytes / elapsed)}/s · ${(routeReceivedBytes * 8 / elapsed / 1000).toFixed(1)} kbit/s`,
     "",
     await routeBlob.slice(0, 512).text(),
   ].join("\n");
@@ -241,11 +319,19 @@ async function transferRoute() {
 
   routeChunks = [];
   routeReceivedBytes = 0;
+  routeOutputBytes = 0;
   routeFrameCount = 0;
   routeExpectedSequence = 0;
   routeRecoveryPending = false;
   routeCrc32 = 0xFFFFFFFF;
   routeLineCount = 0;
+  routeDecoder = new TextDecoder();
+  routeEncodedTextBuffer = "";
+  routeHeaderDecoded = false;
+  routeDecodedPointCount = 0;
+  routePreviousTimestamp = 0;
+  routePreviousLatitude = 0;
+  routePreviousLongitude = 0;
   routeStartedAt = performance.now();
   routeTransferring = true;
   routeStopRequested = false;
@@ -267,7 +353,7 @@ async function transferRoute() {
   } catch (error) {
     if (routeStopRequested) {
       els.routeStatus.textContent = "Zatrzymano";
-      els.routeOutput.textContent = `Odebrano ${formatBytes(routeReceivedBytes)}.`;
+      els.routeOutput.textContent = `Odebrano ${formatBytes(routeReceivedBytes)} delta.`;
     } else {
       els.routeStatus.textContent = "BŁĄD transferu";
       els.routeOutput.textContent = error.message;
@@ -297,7 +383,7 @@ async function stopRouteTransfer() {
   try {
     await writeRouteCommand("STOP");
     rejectRouteTransfer(new Error("Transfer zatrzymany"));
-    log(`Transfer zatrzymany po ${formatBytes(routeReceivedBytes)}`);
+    log(`Transfer zatrzymany po ${formatBytes(routeReceivedBytes)} delta`);
   } catch (error) {
     log(`Nie udało się zatrzymać transferu: ${error.message}`, "error");
   }
@@ -330,7 +416,7 @@ async function connect() {
     await routeDataCharacteristic.startNotifications();
     routeDataCharacteristic.addEventListener("characteristicvaluechanged", handleRouteNotification);
     routeInfo = JSON.parse(decodeValue(await routeInfoCharacteristic.readValue()));
-    els.routeInfo.textContent = `${routeInfo.points.toLocaleString("pl-PL")} punktów · ${formatBytes(routeInfo.raw_bytes)} CSV · MTU ${routeInfo.mtu} · fragment ${routeInfo.chunk_bytes} B`;
+    els.routeInfo.textContent = `${routeInfo.points.toLocaleString("pl-PL")} punktów · ${formatBytes(routeInfo.raw_bytes)} CSV · ${formatBytes(routeInfo.encoded_bytes)} delta · MTU ${routeInfo.mtu} · fragment ${routeInfo.chunk_bytes} B`;
     setConnection("connected", "Połączono");
     setControls(true);
     log("Gotowe: trasa jest pobierana przez NOTIFY", "success");

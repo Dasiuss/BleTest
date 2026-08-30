@@ -32,17 +32,6 @@ uint32_t routeCrc32 = 0;
 uint16_t routePayloadSize = ROUTE_FRAME_SIZE - ROUTE_FRAME_HEADER_SIZE;
 uint8_t routeNotifyBuffer[ROUTE_FRAME_SIZE];
 
-uint32_t calculateRouteCrc32() {
-  uint32_t crc = 0xFFFFFFFF;
-  for (uint32_t index = 0; index < GPS_ROUTE_RAW_SIZE; index += 1) {
-    crc ^= pgm_read_byte(GPS_ROUTE_CSV + index);
-    for (uint8_t bit = 0; bit < 8; bit += 1) {
-      crc = (crc >> 1) ^ (0xEDB88320 & (-(int32_t)(crc & 1)));
-    }
-  }
-  return ~crc;
-}
-
 uint16_t currentRouteMtu() {
   if (bleServer == nullptr || !deviceConnected) return 23;
   return bleServer->getPeerMTU(bleServer->getConnId());
@@ -62,9 +51,10 @@ String makeRouteInfoJson() {
   routePayloadSize = currentRoutePayloadSize();
   char json[256];
   snprintf(json, sizeof(json),
-           "{\"encoding\":\"identity\",\"transport\":\"notify-v1\",\"format\":\"csv\",\"points\":%lu,\"raw_bytes\":%lu,\"crc32\":\"%08lX\",\"mtu\":%u,\"chunk_bytes\":%u,\"window_chunks\":%u,\"ready\":true,\"done\":%s,\"error\":false}",
+           "{\"encoding\":\"delta-v1\",\"transport\":\"notify-v1\",\"format\":\"csv\",\"points\":%lu,\"raw_bytes\":%lu,\"encoded_bytes\":%lu,\"crc32\":\"%08lX\",\"mtu\":%u,\"chunk_bytes\":%u,\"window_chunks\":%u,\"ready\":true,\"done\":%s,\"error\":false}",
            (unsigned long)GPS_ROUTE_POINT_COUNT,
            (unsigned long)GPS_ROUTE_RAW_SIZE,
+           (unsigned long)GPS_ROUTE_DELTA_SIZE,
            (unsigned long)routeCrc32,
            mtu,
            routePayloadSize,
@@ -129,7 +119,7 @@ class RouteControlCallbacks : public BLECharacteristicCallbacks {
 
       routeWindowSent = 0;
       routeAwaitingAck = false;
-      if (routeSourceOffset >= GPS_ROUTE_RAW_SIZE) {
+       if (routeSourceOffset >= GPS_ROUTE_DELTA_SIZE) {
         routeTransferActive = false;
         routeTransferComplete = true;
         Serial.printf("[BLE] ROUTE complete: %lu bytes in %lu ms\n",
@@ -142,7 +132,7 @@ class RouteControlCallbacks : public BLECharacteristicCallbacks {
     if (command.startsWith("NACK:")) {
       uint32_t requestedSequence = strtoul(command.substring(5).c_str(), nullptr, 10);
       uint64_t requestedOffset = (uint64_t)requestedSequence * routePayloadSize;
-      if (!routeTransferActive || requestedOffset > GPS_ROUTE_RAW_SIZE) return;
+       if (!routeTransferActive || requestedOffset > GPS_ROUTE_DELTA_SIZE) return;
 
       routeSourceOffset = (uint32_t)requestedOffset;
       routeNextSequence = requestedSequence;
@@ -162,17 +152,17 @@ class RouteControlCallbacks : public BLECharacteristicCallbacks {
 void pumpRouteNotifications() {
   if (!deviceConnected || !routeTransferActive || routeAwaitingAck || routeDataCharacteristic == nullptr) return;
   if (millis() - routeLastNotifyAt < ROUTE_NOTIFY_INTERVAL_MS) return;
-  if (routeSourceOffset >= GPS_ROUTE_RAW_SIZE) {
+  if (routeSourceOffset >= GPS_ROUTE_DELTA_SIZE) {
     routeAwaitingAck = true;
     return;
   }
 
-  uint32_t remaining = GPS_ROUTE_RAW_SIZE - routeSourceOffset;
+  uint32_t remaining = GPS_ROUTE_DELTA_SIZE - routeSourceOffset;
   uint16_t payloadLength = remaining > routePayloadSize ? routePayloadSize : (uint16_t)remaining;
   uint32_t sequence = routeNextSequence;
   memcpy(routeNotifyBuffer, &sequence, sizeof(sequence));
   memcpy_P(routeNotifyBuffer + ROUTE_FRAME_HEADER_SIZE,
-           GPS_ROUTE_CSV + routeSourceOffset,
+           GPS_ROUTE_DELTA + routeSourceOffset,
            payloadLength);
 
   routeDataCharacteristic->setValue(routeNotifyBuffer, ROUTE_FRAME_HEADER_SIZE + payloadLength);
@@ -184,7 +174,7 @@ void pumpRouteNotifications() {
   routeWindowEndSequence = routeNextSequence;
   routeWindowSent += 1;
 
-  if (routeWindowSent >= ROUTE_NOTIFY_WINDOW_SIZE || routeSourceOffset >= GPS_ROUTE_RAW_SIZE) {
+  if (routeWindowSent >= ROUTE_NOTIFY_WINDOW_SIZE || routeSourceOffset >= GPS_ROUTE_DELTA_SIZE) {
     routeAwaitingAck = true;
   }
 }
@@ -195,7 +185,7 @@ void setup() {
   Serial.println();
   Serial.println("=== BleTestEsp32 GPS route test ===");
   Serial.println("[SYS] Start BLE server");
-  routeCrc32 = calculateRouteCrc32();
+  routeCrc32 = GPS_ROUTE_CRC32;
 
   BLEDevice::init("BleTestEsp32");
   BLEDevice::setMTU(517);
@@ -223,8 +213,9 @@ void setup() {
   BLEDevice::startAdvertising();
 
   Serial.println("[BLE] Advertising: BleTestEsp32");
-  Serial.printf("[BLE] Route source: %lu raw bytes, %lu points\n",
+  Serial.printf("[BLE] Route source: %lu raw bytes, %lu encoded bytes, %lu points\n",
                 (unsigned long)GPS_ROUTE_RAW_SIZE,
+                (unsigned long)GPS_ROUTE_DELTA_SIZE,
                 (unsigned long)GPS_ROUTE_POINT_COUNT);
   Serial.printf("[BLE] Route CRC32: %08lX\n", (unsigned long)routeCrc32);
 }

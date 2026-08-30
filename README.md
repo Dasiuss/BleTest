@@ -6,8 +6,8 @@ Test BLE dla Waveshare ESP32-S3-Zero i telefonu z Androidem.
 
 - ESP32 reklamuje urządzenie BLE o nazwie `BleTestEsp32`.
 - Usługa GATT udostępnia metadane trasy, komendę sterującą oraz dane trasy przez `NOTIFY`.
-- ESP32 przechowuje surowy CSV w pamięci flash i udostępnia go przez BLE bez kompresji.
-- PWA odbiera strumień fragmentów, potwierdza okna pakietów i zapisuje transfer strumieniowo do OPFS, gdy przeglądarka je udostępnia.
+- ESP32 przechowuje dane trasy w pamięci flash i udostępnia je przez BLE jako różnice kolejnych punktów.
+- PWA dekoduje różnice do zwykłego CSV, potwierdza okna pakietów i zapisuje transfer strumieniowo do OPFS, gdy przeglądarka je udostępnia.
 - ESP32 ustawia lokalny MTU na 517; po negocjacji z telefonem payload ma do 240 bajtów zamiast 16 przy domyślnym MTU 23.
 
 ## Firmware w Arduino IDE
@@ -38,7 +38,7 @@ Web Bluetooth wymaga bezpiecznego kontekstu HTTPS. Lokalny plik `index.html` otw
 1. Włącz Bluetooth i zasil ESP32.
 2. Otwórz PWA w Chrome. Nie paruj ESP32 wcześniej z poziomu ustawień Androida.
 3. Naciśnij **Połącz urządzenie** i wybierz `BleTestEsp32`.
-4. Naciśnij **Pobierz trasę**. PWA włączy `NOTIFY`, wyśle `START`, a następnie odbierze cały plik CSV.
+4. Naciśnij **Pobierz trasę**. PWA włączy `NOTIFY`, wyśle `START`, a następnie odbierze i odtworzy cały plik CSV z różnic punktów.
 5. Po zakończeniu PWA pokaże czas, liczbę pakietów, kbit/s i próbkę odebranego CSV.
 6. **Zatrzymaj** przerywa test. **Pobierz CSV** zapisuje odebrane dane.
 
@@ -47,7 +47,7 @@ Web Bluetooth wymaga bezpiecznego kontekstu HTTPS. Lokalny plik `index.html` otw
 - Service: `7e6d0001-7b9e-4f5b-a6c2-320000000001`
 - `route info` (`READ`, metadane): `7e6d0006-7b9e-4f5b-a6c2-320000000006`
 - `route control` (`WRITE`, `START`/`STOP`): `7e6d0007-7b9e-4f5b-a6c2-320000000007`
-- `route data` (`NOTIFY`, ramki CSV z numerem sekwencyjnym): `7e6d0008-7b9e-4f5b-a6c2-320000000008`
+- `route data` (`NOTIFY`, ramki delta z numerem sekwencyjnym): `7e6d0008-7b9e-4f5b-a6c2-320000000008`
 
 ## Generator trasy
 
@@ -63,6 +63,6 @@ Domyślnie tworzy 3 000 punktów, czyli 5 minut przy 10 Hz, aby zmieścić prób
 node tools/generate_route.js --duration-seconds 60 --frequency-hz 10
 ```
 
-Wynik jest surowym plikiem CSV. Generator aktualizuje dane trasy w firmware, a ESP32 wysyła je bezpośrednio bez kompresji. PWA nie musi trzymać całego pliku w pamięci: używa OPFS, a w starszych przeglądarkach przechodzi na bufor `Blob`.
+Wynik jest surowym plikiem CSV. Generator zapisuje w firmware także jego wersję `delta-v1`: pierwszy punkt zawiera wartości bazowe, a każdy następny rekord zawiera różnicę czasu oraz współrzędnych pomnożonych przez `1e6`. PWA odtwarza z niej oryginalny CSV. PWA nie musi trzymać całego pliku w pamięci: używa OPFS, a w starszych przeglądarkach przechodzi na bufor `Blob`.
 
-Wymiana MTU jest negocjacją obu stron. `BLEDevice::setMTU(517)` ustawia maksimum po stronie ESP32, ale klient GATT musi zainicjować wymianę. Ramka NOTIFY ma 4 bajty numeru sekwencyjnego i do 240 bajtów CSV. Transfer używa okna 8 ramek oraz `ACK`/`NACK`, aby wykrywać i retransmitować zgubione fragmenty. Po transferze PWA weryfikuje rozmiar, liczbę punktów i CRC32 pliku.
+Wymiana MTU jest negocjacją obu stron. `BLEDevice::setMTU(517)` ustawia maksimum po stronie ESP32, ale klient GATT musi zainicjować wymianę. Ramka NOTIFY ma 4 bajty numeru sekwencyjnego i do 240 bajtów danych `delta-v1`. Transfer używa okna 8 ramek oraz `ACK`/`NACK`, aby wykrywać i retransmitować zgubione fragmenty. Po transferze PWA weryfikuje rozmiar, liczbę punktów i CRC32 odtworzonego pliku.

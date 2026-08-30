@@ -46,9 +46,9 @@
             <p class="eyebrow">TEST TRANSFERU</p>
             <h2>Archiwalna trasa GPS</h2>
           </div>
-          <span class="protocol-chip">NOTIFY · CSV</span>
+          <span class="protocol-chip">NOTIFY · DELTA</span>
         </div>
-        <p class="route-help">ESP32 przesyła surowy CSV strumieniem NOTIFY. PWA potwierdza okna pakietów i żąda retransmisji po wykryciu brakującego fragmentu.</p>
+        <p class="route-help">ESP32 przesyła różnice kolejnych punktów GPS strumieniem NOTIFY. PWA odtwarza z nich surowy CSV, potwierdza okna pakietów i żąda retransmisji po wykryciu brakującego fragmentu.</p>
         <div class="controls">
           <button id="routeStartButton" class="button button-primary" disabled>Pobierz trasę</button>
           <button id="routeStopButton" class="button button-quiet" disabled>Zatrzymaj</button>
