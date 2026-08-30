@@ -16,7 +16,7 @@
         <div>
           <p class="eyebrow">ESP32-S3 / WEB BLUETOOTH</p>
           <h1>GPS Transfer Test</h1>
-          <p class="intro">Zmierz, jak szybko urządzenie skompresuje i prześle archiwalną trasę GPS przez serię pojedynczych odczytów BLE.</p>
+          <p class="intro">Zmierz, jak szybko urządzenie prześle archiwalną trasę GPS przez strumień powiadomień BLE.</p>
         </div>
         <div id="connectionBadge" class="badge badge-idle"><span class="badge-dot"></span><span id="connectionText">Rozłączono</span></div>
       </header>
@@ -32,7 +32,7 @@
             <p class="eyebrow">POŁĄCZENIE</p>
             <h2>Urządzenie BLE</h2>
           </div>
-          <span class="protocol-chip">READ ONLY TEST</span>
+          <span class="protocol-chip">NOTIFY TEST</span>
         </div>
         <div class="controls">
           <button id="connectButton" class="button button-primary">Połącz urządzenie</button>
@@ -46,13 +46,13 @@
             <p class="eyebrow">TEST TRANSFERU</p>
             <h2>Archiwalna trasa GPS</h2>
           </div>
-          <span class="protocol-chip">READ · ZLIB</span>
+          <span class="protocol-chip">NOTIFY · CSV</span>
         </div>
-        <p class="route-help">ESP32 przechowuje surowy CSV i kompresuje go podczas odczytu standardowym zlib/DEFLATE przez miniz. PWA wykonuje kolejne pojedyncze READ.</p>
+        <p class="route-help">ESP32 przesyła surowy CSV strumieniem NOTIFY. PWA potwierdza okna pakietów i żąda retransmisji po wykryciu brakującego fragmentu.</p>
         <div class="controls">
           <button id="routeStartButton" class="button button-primary" disabled>Pobierz trasę</button>
           <button id="routeStopButton" class="button button-quiet" disabled>Zatrzymaj</button>
-          <a id="routeDownloadLink" class="button button-secondary" hidden download="route-gps.csv.zlib">Pobierz zlib</a>
+          <a id="routeDownloadLink" class="button button-secondary" hidden download="route-gps.csv">Pobierz CSV</a>
         </div>
         <p id="routeInfo" class="route-meta">Połącz urządzenie, aby pobrać informacje o trasie.</p>
         <div class="route-stats">
