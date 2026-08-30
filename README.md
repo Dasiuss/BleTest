@@ -20,7 +20,7 @@ Test BLE dla Waveshare ESP32-S3-Zero i telefonu z Androidem.
 6. Wgraj program. Jeśli upload przez USB nie działa, włącz `USB CDC On Boot` albo użyj trybu bootloadera zgodnie z instrukcją Waveshare.
 6. Otwórz Serial Monitor. Powinien pojawić się komunikat `Advertising: BleTestEsp32`.
 
-Nie trzeba instalować dodatkowej biblioteki BLE. `BLEDevice`, `BLEServer` i `BLE2902` są częścią pakietu ESP32 dla Arduino.
+Nie trzeba instalować dodatkowej biblioteki BLE. `BLEDevice` i `BLEServer` są częścią pakietu ESP32 dla Arduino. `miniz.c` i `miniz.h` znajdują się lokalnie w katalogu szkicu i Arduino IDE skompiluje je razem z programem.
 
 ## PWA na GitHub Pages
 
