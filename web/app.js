@@ -88,14 +88,13 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function waitForRouteCompression() {
+async function waitForRouteReady() {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     routeInfo = JSON.parse(decodeValue(await routeInfoCharacteristic.readValue()));
-    if (routeInfo.error) throw new Error("ESP32 nie zdołał skompresować trasy");
     if (routeInfo.ready) return;
     await sleep(10);
   }
-  throw new Error("Timeout oczekiwania na kompresję trasy");
+  throw new Error("Timeout oczekiwania na gotowość trasy");
 }
 
 async function readRouteChunk() {
@@ -105,7 +104,6 @@ async function readRouteChunk() {
     if (chunk.byteLength > 0) return chunk;
 
     routeInfo = JSON.parse(decodeValue(await routeInfoCharacteristic.readValue()));
-    if (routeInfo.error) throw new Error("ESP32 nie zdołał skompresować trasy");
     if (routeInfo.done) return null;
     await sleep(10);
   }
@@ -113,31 +111,26 @@ async function readRouteChunk() {
 
 async function finishRouteTransfer() {
   const elapsed = (performance.now() - routeStartedAt) / 1000;
-  const compressedBlob = new Blob(routeChunks, { type: "application/zlib" });
-  if (!("DecompressionStream" in window)) throw new Error("Przeglądarka nie obsługuje DecompressionStream");
-  const rawText = await new Response(
-    compressedBlob.stream().pipeThrough(new DecompressionStream("deflate"))
-  ).text();
+  const routeBlob = new Blob(routeChunks, { type: "text/csv" });
+  const rawText = await routeBlob.text();
   const rawBytes = new TextEncoder().encode(rawText).byteLength;
   const pointCount = rawText.split("\n").filter(Boolean).length - 1;
   if (rawBytes !== routeInfo.raw_bytes || pointCount !== routeInfo.points) {
     throw new Error(`Walidacja CSV nie powiodła się: ${pointCount} punktów, ${rawBytes} bajtów`);
   }
-  const compression = routeInfo.raw_bytes / routeReceivedBytes;
 
   if (routeDownloadUrl) URL.revokeObjectURL(routeDownloadUrl);
-  routeDownloadUrl = URL.createObjectURL(compressedBlob);
+  routeDownloadUrl = URL.createObjectURL(routeBlob);
   els.routeDownloadLink.href = routeDownloadUrl;
   els.routeDownloadLink.hidden = false;
-  els.routeDownloadLink.textContent = `Pobierz zlib (${formatBytes(routeReceivedBytes)})`;
+  els.routeDownloadLink.textContent = `Pobierz CSV (${formatBytes(routeReceivedBytes)})`;
   els.routeStatus.textContent = `OK · ${elapsed.toFixed(2)} s`;
   els.routeOutput.textContent = [
     `Punkty: ${routeInfo.points.toLocaleString("pl-PL")}`,
     `Odczyty READ: ${routeReadCount.toLocaleString("pl-PL")}`,
     `Surowy CSV: ${formatBytes(rawBytes)}`,
-    `Zlib: ${formatBytes(routeReceivedBytes)} · kompresja ${compression.toFixed(1)}x`,
-    `Transfer zlib: ${formatBytes(routeReceivedBytes / elapsed)}/s · ${(routeReceivedBytes * 8 / elapsed / 1000).toFixed(1)} kbit/s`,
-    `Transfer efektywny CSV: ${formatBytes(rawBytes / elapsed)}/s`,
+    `CSV: ${formatBytes(routeReceivedBytes)}`,
+    `Transfer CSV: ${formatBytes(routeReceivedBytes / elapsed)}/s · ${(routeReceivedBytes * 8 / elapsed / 1000).toFixed(1)} kbit/s`,
     "",
     rawText.split("\n").slice(0, 3).join("\n"),
   ].join("\n");
@@ -154,13 +147,13 @@ async function transferRoute() {
   routeTransferring = true;
   routeStopRequested = false;
   els.routeStatus.textContent = "Pobieranie...";
-  els.routeOutput.textContent = "Urządzenie kompresuje trasę podczas odczytu...";
+  els.routeOutput.textContent = "Urządzenie udostępnia trasę podczas odczytu...";
   els.routeDownloadLink.hidden = true;
   setControls(true);
 
   try {
     await routeControlCharacteristic.writeValue(new TextEncoder().encode("START"));
-    await waitForRouteCompression();
+    await waitForRouteReady();
     while (true) {
       const chunk = await readRouteChunk();
       if (chunk === null) break;

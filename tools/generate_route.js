@@ -66,6 +66,6 @@ fs.writeFileSync(headerOutput, header, "ascii");
 
 console.log(`points: ${totalPoints}`);
 console.log(`raw: ${raw.length} bytes`);
-console.log("compression: performed on ESP32 with miniz tdefl");
+console.log("encoding: raw CSV for ESP32 BLE streaming");
 console.log(`header: ${headerOutput}`);
 console.log(`raw file: ${rawOutput}`);
