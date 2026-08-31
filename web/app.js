@@ -1,11 +1,10 @@
-const APP_VERSION = "v3";
+const APP_VERSION = "v4";
 const SERVICE_UUID = "7e6d0001-7b9e-4f5b-a6c2-320000000001";
 const ROUTE_INFO_CHARACTERISTIC_UUID = "7e6d0006-7b9e-4f5b-a6c2-320000000006";
 const ROUTE_CONTROL_CHARACTERISTIC_UUID = "7e6d0007-7b9e-4f5b-a6c2-320000000007";
 const ROUTE_DATA_CHARACTERISTIC_UUID = "7e6d0008-7b9e-4f5b-a6c2-320000000008";
 const ROUTE_FRAME_HEADER_SIZE = 4;
 const ROUTE_OUTPUT_FLUSH_SIZE = 16 * 1024;
-const ROUTE_MAX_RETRIES = 3;
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -39,6 +38,7 @@ let routeFrameCount = 0;
 let routeExpectedSequence = 0;
 let routeLostFrames = 0;
 let routeLastDuplicateAckSequence = -1;
+let routeRecoveryPending = false;
 let routeCrc32 = 0xFFFFFFFF;
 let routeStartedAt = 0;
 let routeFirstNotifyAt = 0;
@@ -220,14 +220,15 @@ function handleRouteNotification(event) {
   }
   if (sequence > routeExpectedSequence) {
     routeLostFrames += sequence - routeExpectedSequence;
-    routeRetryRequested = true;
-    const error = new Error(`Utracono ramkę NOTIFY trasy przed sekwencją ${sequence}`);
-    if (routeCompressedController) routeCompressedController.error(error);
-    writeRouteCommand("STOP").catch(() => {});
-    rejectRouteTransfer(error);
+    if (!routeRecoveryPending) {
+      routeRecoveryPending = true;
+      protocolLog(`NACK: ${routeExpectedSequence} · otrzymano #${sequence}`);
+      writeRouteCommand(`NACK:${routeExpectedSequence}`).catch(rejectRouteTransfer);
+    }
     return;
   }
 
+  routeRecoveryPending = false;
   routeExpectedSequence += 1;
   routeFrameCount += 1;
   const payload = new Uint8Array(value.buffer, value.byteOffset + ROUTE_FRAME_HEADER_SIZE, value.byteLength - ROUTE_FRAME_HEADER_SIZE).slice();
@@ -242,6 +243,7 @@ function handleRouteNotification(event) {
       rejectRouteTransfer(error);
       return;
     }
+    writeRouteCommand(`ACK:${routeExpectedSequence}`).catch(rejectRouteTransfer);
     routeDecompressionPromise.then(() => routeTransferResolve?.(), rejectRouteTransfer);
     updateRouteProgress();
     return;
@@ -302,7 +304,7 @@ async function finishRouteTransfer() {
     `Punkty GPS: ${routeInfo.points.toLocaleString("pl-PL")}`,
     `Wiersze NMEA: ${routeLineCount.toLocaleString("pl-PL")}`,
     `Pakiety NOTIFY: ${routeFrameCount.toLocaleString("pl-PL")}`,
-    `Zgubione ramki: ${routeLostFrames}`,
+  `Odzyskane luki ramek: ${routeLostFrames}`,
     `Pierwszy NOTIFY po: ${(firstNotifyDelay * 1000).toFixed(0)} ms`,
     `CRC32: ${receivedCrc32}`,
     `Skompresowany wire: ${formatBytes(routeReceivedBytes)}`,
@@ -317,7 +319,7 @@ async function finishRouteTransfer() {
   log(`Transfer trasy ${APP_VERSION} zakończony: ${elapsed.toFixed(2)} s`, "success");
 }
 
-async function transferRoute(retryAttempt = 0) {
+async function transferRoute() {
   if (!routeControlCharacteristic || !routeDataCharacteristic || routeTransferring) return;
 
   routeChunks = [];
@@ -327,6 +329,7 @@ async function transferRoute(retryAttempt = 0) {
   routeExpectedSequence = 0;
   routeLostFrames = 0;
   routeLastDuplicateAckSequence = -1;
+  routeRecoveryPending = false;
   routeCrc32 = 0xFFFFFFFF;
   routeLineCount = 0;
   routePendingOutput = [];
@@ -336,7 +339,6 @@ async function transferRoute(retryAttempt = 0) {
   routeStartedAt = 0;
   routeFirstNotifyAt = 0;
   routeTransferEndAt = 0;
-  routeRetryRequested = false;
   routeTransferring = true;
   routeStopRequested = false;
   els.routeStatus.textContent = "Pobieranie...";
@@ -344,7 +346,6 @@ async function transferRoute(retryAttempt = 0) {
   els.routeDownloadLink.hidden = true;
   setControls(true);
 
-  let retryTransfer = false;
   try {
     await prepareRouteStorage();
     routeTransferPromise = new Promise((resolve, reject) => {
@@ -361,10 +362,6 @@ async function transferRoute(retryAttempt = 0) {
     if (routeStopRequested) {
       els.routeStatus.textContent = "Zatrzymano";
       els.routeOutput.textContent = `Odebrano ${formatBytes(routeReceivedBytes)} skompresowanych danych.`;
-    } else if (routeRetryRequested && retryAttempt < ROUTE_MAX_RETRIES) {
-      retryTransfer = true;
-      els.routeStatus.textContent = `Ponawianie (${retryAttempt + 1}/${ROUTE_MAX_RETRIES})...`;
-      log(`Utracono ramkę. Ponawiam cały strumień (${retryAttempt + 1}/${ROUTE_MAX_RETRIES})`, "error");
     } else {
       els.routeStatus.textContent = "BŁĄD transferu";
       els.routeOutput.textContent = error.message;
@@ -390,9 +387,6 @@ async function transferRoute(retryAttempt = 0) {
     setControls(Boolean(routeDataCharacteristic));
   }
 
-  if (retryTransfer && routeDataCharacteristic && routeControlCharacteristic) {
-    setTimeout(() => transferRoute(retryAttempt + 1), 250);
-  }
 }
 
 async function stopRouteTransfer() {
