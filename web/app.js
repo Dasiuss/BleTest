@@ -1,7 +1,10 @@
+const APP_VERSION = "v2";
 const SERVICE_UUID = "7e6d0001-7b9e-4f5b-a6c2-320000000001";
 const ROUTE_INFO_CHARACTERISTIC_UUID = "7e6d0006-7b9e-4f5b-a6c2-320000000006";
 const ROUTE_CONTROL_CHARACTERISTIC_UUID = "7e6d0007-7b9e-4f5b-a6c2-320000000007";
 const ROUTE_DATA_CHARACTERISTIC_UUID = "7e6d0008-7b9e-4f5b-a6c2-320000000008";
+const ROUTE_FRAME_HEADER_SIZE = 4;
+const ROUTE_OUTPUT_FLUSH_SIZE = 16 * 1024;
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -32,28 +35,27 @@ let routeReceivedBytes = 0;
 let routeOutputBytes = 0;
 let routeFrameCount = 0;
 let routeExpectedSequence = 0;
-let routeRecoveryPending = false;
+let routeLostFrames = 0;
 let routeCrc32 = 0xFFFFFFFF;
 let routeStartedAt = 0;
+let routeFirstNotifyAt = 0;
+let routeTransferEndAt = 0;
 let routeTransferring = false;
 let routeStopRequested = false;
 let routeDownloadUrl = null;
 let routeTransferPromise = null;
 let routeTransferResolve = null;
 let routeTransferReject = null;
+let routeTransferTimeout = null;
 let routeControlWriteChain = Promise.resolve();
 let routeStorageChain = Promise.resolve();
 let routeFileHandle = null;
 let routeFileWriter = null;
 let routeLineCount = 0;
-let routeDecoder = null;
-let routeEncodedTextBuffer = "";
-let routeHeaderDecoded = false;
-let routeDecodedPointCount = 0;
-let routePreviousTimestamp = 0;
-let routePreviousLatitude = 0;
-let routePreviousLongitude = 0;
 let routePendingOutput = [];
+let routePendingOutputBytes = 0;
+let routeCompressedController = null;
+let routeDecompressionPromise = null;
 
 function log(message, type = "") {
   const entry = document.createElement("div");
@@ -97,15 +99,18 @@ function characteristicProperties(characteristic) {
   ].filter(([key]) => characteristic.properties[key]).map(([, label]) => label).join(" + ");
 }
 
-function updateRouteProgress() {
-  const elapsed = routeStartedAt ? (performance.now() - routeStartedAt) / 1000 : 0;
-  const rate = elapsed > 0 ? routeReceivedBytes / elapsed : 0;
-  els.routeReceived.textContent = `${formatBytes(routeOutputBytes)} CSV · ${routeFrameCount.toLocaleString("pl-PL")} NOTIFY`;
-  els.routeRate.textContent = elapsed > 0 ? `${formatBytes(rate)}/s · ${(rate * 8 / 1000).toFixed(1)} kbit/s` : "---";
+function transferElapsed() {
+  const end = routeTransferEndAt || performance.now();
+  return routeStartedAt ? (end - routeStartedAt) / 1000 : 0;
 }
 
-function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function updateRouteProgress() {
+  const elapsed = transferElapsed();
+  const compressedRate = elapsed > 0 ? routeReceivedBytes / elapsed : 0;
+  els.routeReceived.textContent = `${formatBytes(routeReceivedBytes)} zlib · ${formatBytes(routeOutputBytes)} CSV · ${routeFrameCount.toLocaleString("pl-PL")} NOTIFY`;
+  els.routeRate.textContent = elapsed > 0
+    ? `${formatBytes(compressedRate)}/s · ${(compressedRate * 8 / 1000).toFixed(1)} kbit/s`
+    : "---";
 }
 
 function updateRouteCrc32(bytes) {
@@ -117,24 +122,24 @@ function updateRouteCrc32(bytes) {
   }
 }
 
-function persistRouteOutput(text) {
-  const bytes = new TextEncoder().encode(text);
+function persistRouteOutput(bytes) {
   updateRouteCrc32(bytes);
   routeOutputBytes += bytes.byteLength;
-  routeLineCount += 1;
-  routePendingOutput.push(bytes);
+  for (const byte of bytes) if (byte === 10) routeLineCount += 1;
+  routePendingOutput.push(bytes.slice());
+  routePendingOutputBytes += bytes.byteLength;
 }
 
 function flushRouteOutput() {
   if (routePendingOutput.length === 0) return;
-  const size = routePendingOutput.reduce((total, bytes) => total + bytes.byteLength, 0);
-  const bytes = new Uint8Array(size);
+  const bytes = new Uint8Array(routePendingOutputBytes);
   let offset = 0;
   for (const part of routePendingOutput) {
     bytes.set(part, offset);
     offset += part.byteLength;
   }
   routePendingOutput = [];
+  routePendingOutputBytes = 0;
   if (routeFileWriter) {
     routeStorageChain = routeStorageChain.then(() => routeFileWriter.write(bytes));
   } else {
@@ -142,62 +147,35 @@ function flushRouteOutput() {
   }
 }
 
-function decodeRouteLine(line) {
-  if (!routeHeaderDecoded) {
-    if (line !== "t_ms,latitude,longitude") throw new Error("Nieprawidłowy nagłówek delta trasy");
-    routeHeaderDecoded = true;
-    persistRouteOutput(`${line}\n`);
-    return;
+async function consumeDecompressedRoute(stream) {
+  const reader = stream.getReader();
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+    persistRouteOutput(bytes);
+    if (routePendingOutputBytes >= ROUTE_OUTPUT_FLUSH_SIZE) flushRouteOutput();
+    updateRouteProgress();
   }
-
-  const fields = line.split(",");
-  if (fields.length !== 3) throw new Error("Nieprawidłowy rekord delta trasy");
-  const values = fields.map(Number);
-  if (values.some((value) => !Number.isInteger(value) || !Number.isFinite(value))) {
-    throw new Error("Nieprawidłowa wartość delta trasy");
-  }
-
-  if (routeDecodedPointCount === 0) {
-    [routePreviousTimestamp, routePreviousLatitude, routePreviousLongitude] = values;
-  } else {
-    routePreviousTimestamp += values[0];
-    routePreviousLatitude += values[1];
-    routePreviousLongitude += values[2];
-  }
-
-  persistRouteOutput(`${routePreviousTimestamp},${(routePreviousLatitude / 1e6).toFixed(6)},${(routePreviousLongitude / 1e6).toFixed(6)}\n`);
-  routeDecodedPointCount += 1;
+  flushRouteOutput();
+  await routeStorageChain;
 }
 
-function decodeRoutePayload(payload) {
-  routeEncodedTextBuffer += routeDecoder.decode(payload, { stream: true });
-  let newlineIndex = routeEncodedTextBuffer.indexOf("\n");
-  while (newlineIndex !== -1) {
-    const line = routeEncodedTextBuffer.slice(0, newlineIndex).replace(/\r$/, "");
-    routeEncodedTextBuffer = routeEncodedTextBuffer.slice(newlineIndex + 1);
-    decodeRouteLine(line);
-    newlineIndex = routeEncodedTextBuffer.indexOf("\n");
+function startRouteDecompressor() {
+  if (!window.DecompressionStream || !window.ReadableStream) {
+    throw new Error("Ta przeglądarka nie obsługuje natywnej dekompresji DEFLATE");
   }
-}
 
-function finishRouteDecoder() {
-  routeEncodedTextBuffer += routeDecoder.decode();
-  if (routeEncodedTextBuffer.length > 0) {
-    decodeRouteLine(routeEncodedTextBuffer.replace(/\r$/, ""));
-    routeEncodedTextBuffer = "";
-  }
-  if (!routeHeaderDecoded || routeDecodedPointCount !== routeInfo.points) {
-    throw new Error("Nieprawidłowa liczba punktów delta trasy");
-  }
-}
-
-async function waitForRouteReady() {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    routeInfo = JSON.parse(decodeValue(await routeInfoCharacteristic.readValue()));
-    if (routeInfo.ready) return;
-    await sleep(10);
-  }
-  throw new Error("Timeout oczekiwania na gotowość trasy");
+  const compressedStream = new ReadableStream({
+    start(controller) {
+      routeCompressedController = controller;
+    },
+  });
+  const decompressedStream = compressedStream.pipeThrough(new DecompressionStream("deflate"));
+  routeDecompressionPromise = consumeDecompressedRoute(decompressedStream);
+  routeDecompressionPromise.catch((error) => {
+    if (routeTransferring) rejectRouteTransfer(error);
+  });
 }
 
 function writeRouteCommand(command) {
@@ -207,33 +185,15 @@ function writeRouteCommand(command) {
   return operation;
 }
 
-async function waitForRouteComplete() {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    routeInfo = JSON.parse(decodeValue(await routeInfoCharacteristic.readValue()));
-    if (routeInfo.done) return;
-    await sleep(10);
-  }
-  throw new Error("Timeout oczekiwania na potwierdzenie trasy");
-}
-
 function rejectRouteTransfer(error) {
   if (routeTransferReject) routeTransferReject(error);
-}
-
-function acknowledgeRouteSequence(sequence, finalFrame, persisted) {
-  const acknowledgement = persisted.then(() => writeRouteCommand(`ACK:${sequence}`));
-  if (finalFrame) {
-    acknowledgement.then(waitForRouteComplete).then(() => routeTransferResolve?.(), rejectRouteTransfer);
-  } else {
-    acknowledgement.catch(rejectRouteTransfer);
-  }
 }
 
 function handleRouteNotification(event) {
   if (!routeTransferring || !routeInfo) return;
 
   const value = event.target.value;
-  if (value.byteLength < 4) {
+  if (value.byteLength < ROUTE_FRAME_HEADER_SIZE) {
     rejectRouteTransfer(new Error("Nieprawidłowa ramka NOTIFY trasy"));
     return;
   }
@@ -242,48 +202,39 @@ function handleRouteNotification(event) {
   const sequence = view.getUint32(0, true);
   if (sequence < routeExpectedSequence) return;
   if (sequence > routeExpectedSequence) {
-    if (!routeRecoveryPending) {
-      routeRecoveryPending = true;
-      writeRouteCommand(`NACK:${routeExpectedSequence}`).catch(rejectRouteTransfer);
-    }
-    return;
-  }
-
-  routeRecoveryPending = false;
-  const payload = new Uint8Array(value.buffer, value.byteOffset + 4, value.byteLength - 4).slice();
-  if (payload.byteLength > routeInfo.chunk_bytes || routeReceivedBytes + payload.byteLength > routeInfo.encoded_bytes) {
-    rejectRouteTransfer(new Error("Nieprawidłowy rozmiar fragmentu trasy"));
-    return;
-  }
-
-  routeReceivedBytes += payload.byteLength;
-  routeFrameCount += 1;
-  try {
-    decodeRoutePayload(payload);
-  } catch (error) {
+    routeLostFrames += sequence - routeExpectedSequence;
+    const error = new Error(`Utracono ramkę NOTIFY trasy przed sekwencją ${sequence}`);
+    if (routeCompressedController) routeCompressedController.error(error);
     rejectRouteTransfer(error);
     return;
   }
-  routeExpectedSequence += 1;
-  updateRouteProgress();
 
-  const finalFrame = routeReceivedBytes === routeInfo.encoded_bytes;
-  if (finalFrame) {
+  routeExpectedSequence += 1;
+  routeFrameCount += 1;
+  const payload = new Uint8Array(value.buffer, value.byteOffset + ROUTE_FRAME_HEADER_SIZE, value.byteLength - ROUTE_FRAME_HEADER_SIZE).slice();
+  if (routeFirstNotifyAt === 0) routeFirstNotifyAt = performance.now();
+
+  if (payload.byteLength === 0) {
+    routeTransferEndAt = performance.now();
     try {
-      finishRouteDecoder();
+      routeCompressedController.close();
     } catch (error) {
       rejectRouteTransfer(error);
       return;
     }
+    routeDecompressionPromise.then(() => routeTransferResolve?.(), rejectRouteTransfer);
+    updateRouteProgress();
+    return;
   }
-  const requiresAcknowledgement = finalFrame || routeExpectedSequence % routeInfo.window_chunks === 0;
-  if (requiresAcknowledgement) {
-    flushRouteOutput();
+
+  routeReceivedBytes += payload.byteLength;
+  try {
+    routeCompressedController.enqueue(payload);
+  } catch (error) {
+    rejectRouteTransfer(error);
+    return;
   }
-  const persisted = routeStorageChain;
-  if (requiresAcknowledgement) {
-    acknowledgeRouteSequence(routeExpectedSequence, finalFrame, persisted);
-  }
+  updateRouteProgress();
 }
 
 async function prepareRouteStorage() {
@@ -298,18 +249,18 @@ async function prepareRouteStorage() {
 }
 
 async function finishRouteTransfer() {
-  const elapsed = (performance.now() - routeStartedAt) / 1000;
+  const elapsed = transferElapsed();
   await routeStorageChain;
   if (routeFileWriter) {
     await routeFileWriter.close();
     routeFileWriter = null;
   }
+
   const routeBlob = routeFileHandle ? await routeFileHandle.getFile() : new Blob(routeChunks, { type: "text/csv" });
   const rawBytes = routeBlob.size;
-  const pointCount = Math.max(0, routeLineCount - 1);
   const receivedCrc32 = ((routeCrc32 ^ 0xFFFFFFFF) >>> 0).toString(16).toUpperCase().padStart(8, "0");
-  if (rawBytes !== routeInfo.raw_bytes || pointCount !== routeInfo.points || receivedCrc32 !== routeInfo.crc32) {
-    throw new Error(`Walidacja CSV nie powiodła się: ${pointCount} punktów, ${rawBytes} bajtów`);
+  if (rawBytes !== routeInfo.raw_bytes || routeLineCount !== routeInfo.lines || receivedCrc32 !== routeInfo.crc32) {
+    throw new Error(`Walidacja NMEA nie powiodła się: ${routeLineCount} linii, ${rawBytes} bajtów, CRC ${receivedCrc32}`);
   }
 
   if (routeDownloadUrl) URL.revokeObjectURL(routeDownloadUrl);
@@ -317,19 +268,30 @@ async function finishRouteTransfer() {
   els.routeDownloadLink.href = routeDownloadUrl;
   els.routeDownloadLink.hidden = false;
   els.routeDownloadLink.textContent = `Pobierz CSV (${formatBytes(rawBytes)})`;
+
+  const decompressionElapsed = Math.max(0, (performance.now() - routeTransferEndAt) / 1000);
+  const firstNotifyDelay = Math.max(0, (routeFirstNotifyAt - routeStartedAt) / 1000);
+  const compressedRate = elapsed > 0 ? routeReceivedBytes / elapsed : 0;
+  const totalRate = elapsed > 0 ? rawBytes / elapsed : 0;
   els.routeStatus.textContent = `OK · ${elapsed.toFixed(2)} s`;
   els.routeOutput.textContent = [
-    `Punkty: ${routeInfo.points.toLocaleString("pl-PL")}`,
+    `Wersja: ${APP_VERSION}`,
+    `Punkty GPS: ${routeInfo.points.toLocaleString("pl-PL")}`,
+    `Wiersze NMEA: ${routeLineCount.toLocaleString("pl-PL")}`,
     `Pakiety NOTIFY: ${routeFrameCount.toLocaleString("pl-PL")}`,
+    `Zgubione ramki: ${routeLostFrames}`,
+    `Pierwszy NOTIFY po: ${(firstNotifyDelay * 1000).toFixed(0)} ms`,
     `CRC32: ${receivedCrc32}`,
-    `Delta wire: ${formatBytes(routeReceivedBytes)}`,
+    `Skompresowany wire: ${formatBytes(routeReceivedBytes)}`,
     `Surowy CSV: ${formatBytes(rawBytes)}`,
-    `Redukcja: ${(routeInfo.raw_bytes / routeInfo.encoded_bytes).toFixed(2)}x`,
-    `Transfer delta: ${formatBytes(routeReceivedBytes / elapsed)}/s · ${(routeReceivedBytes * 8 / elapsed / 1000).toFixed(1)} kbit/s`,
+    `Redukcja: ${(rawBytes / routeReceivedBytes).toFixed(2)}x`,
+    `Bitrate skompresowany: ${formatBytes(compressedRate)}/s · ${(compressedRate * 8 / 1000).toFixed(1)} kbit/s`,
+    `Średni bitrate całkowity CSV: ${formatBytes(totalRate)}/s · ${(totalRate * 8 / 1000).toFixed(1)} kbit/s`,
+    `Dekompresja po ostatnim NOTIFY: ${(decompressionElapsed * 1000).toFixed(0)} ms`,
     "",
     await routeBlob.slice(0, 512).text(),
   ].join("\n");
-  log(`Transfer trasy zakończony: ${elapsed.toFixed(2)} s`, "success");
+  log(`Transfer trasy ${APP_VERSION} zakończony: ${elapsed.toFixed(2)} s`, "success");
 }
 
 async function transferRoute() {
@@ -340,22 +302,20 @@ async function transferRoute() {
   routeOutputBytes = 0;
   routeFrameCount = 0;
   routeExpectedSequence = 0;
-  routeRecoveryPending = false;
+  routeLostFrames = 0;
   routeCrc32 = 0xFFFFFFFF;
   routeLineCount = 0;
-  routeDecoder = new TextDecoder();
-  routeEncodedTextBuffer = "";
-  routeHeaderDecoded = false;
-  routeDecodedPointCount = 0;
-  routePreviousTimestamp = 0;
-  routePreviousLatitude = 0;
-  routePreviousLongitude = 0;
   routePendingOutput = [];
-  routeStartedAt = performance.now();
+  routePendingOutputBytes = 0;
+  routeCompressedController = null;
+  routeDecompressionPromise = null;
+  routeStartedAt = 0;
+  routeFirstNotifyAt = 0;
+  routeTransferEndAt = 0;
   routeTransferring = true;
   routeStopRequested = false;
   els.routeStatus.textContent = "Pobieranie...";
-  els.routeOutput.textContent = "Urządzenie strumieniuje trasę przez NOTIFY...";
+  els.routeOutput.textContent = "ESP32 kompresuje surowy NMEA CSV w loop i strumieniuje DEFLATE przez NOTIFY...";
   els.routeDownloadLink.hidden = true;
   setControls(true);
 
@@ -365,20 +325,24 @@ async function transferRoute() {
       routeTransferResolve = resolve;
       routeTransferReject = reject;
     });
+    startRouteDecompressor();
+    routeStartedAt = performance.now();
+    routeTransferTimeout = setTimeout(() => rejectRouteTransfer(new Error("Timeout oczekiwania na koniec transferu")), 120000);
     await writeRouteCommand("START");
-    await waitForRouteReady();
     await routeTransferPromise;
     await finishRouteTransfer();
   } catch (error) {
     if (routeStopRequested) {
       els.routeStatus.textContent = "Zatrzymano";
-      els.routeOutput.textContent = `Odebrano ${formatBytes(routeReceivedBytes)} delta.`;
+      els.routeOutput.textContent = `Odebrano ${formatBytes(routeReceivedBytes)} skompresowanych danych.`;
     } else {
       els.routeStatus.textContent = "BŁĄD transferu";
       els.routeOutput.textContent = error.message;
       log(`Transfer trasy nie powiódł się: ${error.message}`, "error");
     }
   } finally {
+    if (routeTransferTimeout) clearTimeout(routeTransferTimeout);
+    routeTransferTimeout = null;
     if (routeFileWriter) {
       try {
         await routeFileWriter.abort();
@@ -387,6 +351,7 @@ async function transferRoute() {
       }
       routeFileWriter = null;
     }
+    routeCompressedController = null;
     routeTransferPromise = null;
     routeTransferResolve = null;
     routeTransferReject = null;
@@ -401,8 +366,9 @@ async function stopRouteTransfer() {
   routeStopRequested = true;
   try {
     await writeRouteCommand("STOP");
+    routeCompressedController?.error(new Error("Transfer zatrzymany"));
     rejectRouteTransfer(new Error("Transfer zatrzymany"));
-    log(`Transfer zatrzymany po ${formatBytes(routeReceivedBytes)} delta`);
+    log(`Transfer zatrzymany po ${formatBytes(routeReceivedBytes)} skompresowanych danych`);
   } catch (error) {
     log(`Nie udało się zatrzymać transferu: ${error.message}`, "error");
   }
@@ -416,7 +382,7 @@ async function connect() {
 
   try {
     setConnection("busy", "Wybierz urządzenie");
-    log("Otwieram wybór urządzenia BLE...");
+    log(`Otwieram wybór urządzenia BLE (${APP_VERSION})...`);
     device = await navigator.bluetooth.requestDevice({
       filters: [{ services: [SERVICE_UUID] }],
       optionalServices: [SERVICE_UUID],
@@ -435,10 +401,13 @@ async function connect() {
     await routeDataCharacteristic.startNotifications();
     routeDataCharacteristic.addEventListener("characteristicvaluechanged", handleRouteNotification);
     routeInfo = JSON.parse(decodeValue(await routeInfoCharacteristic.readValue()));
-    els.routeInfo.textContent = `${routeInfo.points.toLocaleString("pl-PL")} punktów · ${formatBytes(routeInfo.raw_bytes)} CSV · ${formatBytes(routeInfo.encoded_bytes)} delta · MTU ${routeInfo.mtu} · fragment ${routeInfo.chunk_bytes} B`;
+    if (routeInfo.version !== APP_VERSION || routeInfo.encoding !== "zlib-deflate") {
+      throw new Error(`Nieobsługiwana wersja protokołu: ${routeInfo.version || "brak"}`);
+    }
+    els.routeInfo.textContent = `${routeInfo.version} · ${routeInfo.points.toLocaleString("pl-PL")} punktów · ${routeInfo.lines.toLocaleString("pl-PL")} wierszy NMEA · ${formatBytes(routeInfo.raw_bytes)} CSV · zlib DEFLATE · MTU ${routeInfo.mtu} · fragment ${routeInfo.chunk_bytes} B`;
     setConnection("connected", "Połączono");
     setControls(true);
-    log("Gotowe: trasa jest pobierana przez NOTIFY", "success");
+    log(`Gotowe: ${APP_VERSION}, surowy NMEA CSV przez NOTIFY`, "success");
   } catch (error) {
     log(`Połączenie nie powiodło się: ${error.message}`, "error");
     setConnection("error", "Błąd połączenia");
@@ -475,6 +444,6 @@ els.routeStartButton.addEventListener("click", transferRoute);
 els.routeStopButton.addEventListener("click", stopRouteTransfer);
 els.clearLogButton.addEventListener("click", () => els.eventLog.replaceChildren());
 
-if (!navigator.bluetooth) els.browserWarning.hidden = false;
+if (!navigator.bluetooth || !window.DecompressionStream) els.browserWarning.hidden = false;
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch((error) => log(`Service worker: ${error.message}`, "error"));
-log("Gotowe. Połącz urządzenie, aby uruchomić test trasy.");
+log(`Gotowe. PWA ${APP_VERSION}. Połącz urządzenie, aby uruchomić test trasy.`);

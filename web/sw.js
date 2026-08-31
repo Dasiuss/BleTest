@@ -1,4 +1,4 @@
-const CACHE_NAME = "ble-test-console-v6";
+const CACHE_NAME = "ble-test-console-v7";
 const APP_ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", (event) => {

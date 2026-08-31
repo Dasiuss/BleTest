@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Generate a deterministic, slowly changing GPS route for the BLE transfer test.
+// Generate deterministic NMEA sentences for the BLE transfer benchmark.
 const fs = require("fs");
 const path = require("path");
 
@@ -14,7 +14,7 @@ const pathFor = (name, fallback) => {
   return index === -1 ? fallback : args[index + 1];
 };
 
-const durationSeconds = valueFor("--duration-seconds", 300);
+const durationSeconds = valueFor("--duration-seconds", 70);
 const frequencyHz = valueFor("--frequency-hz", 10);
 const headerOutput = pathFor("--header-output", "firmware/BleTestEsp32/route_data.h");
 const rawOutput = pathFor("--raw-output", "route_gps.csv");
@@ -25,46 +25,53 @@ if (!Number.isInteger(durationSeconds) || durationSeconds < 1 || !Number.isInteg
 }
 
 const totalPoints = durationSeconds * frequencyHz;
-const lines = ["t_ms,latitude,longitude\n"];
-const deltaLines = ["t_ms,latitude,longitude\n"];
+const lines = [];
 const originLat = 52.2297;
 const originLon = 21.0122;
-let previousPoint = null;
+
+function nmeaCoordinate(value, latitude) {
+  const absolute = Math.abs(value);
+  const degrees = Math.floor(absolute);
+  const minutes = (absolute - degrees) * 60;
+  const degreeWidth = latitude ? 2 : 3;
+  return `${degrees.toString().padStart(degreeWidth, "0")}${minutes.toFixed(4).padStart(7, "0")}`;
+}
+
+function nmeaSentence(body) {
+  let checksum = 0;
+  for (const character of body) checksum ^= character.charCodeAt(0);
+  return `$${body}*${checksum.toString(16).toUpperCase().padStart(2, "0")}\r\n`;
+}
+
+function nmeaTime(timestampMs) {
+  const totalCentiseconds = Math.floor(timestampMs / 10);
+  const hours = Math.floor(totalCentiseconds / 360000) % 24;
+  const minutes = Math.floor(totalCentiseconds / 6000) % 60;
+  const seconds = Math.floor(totalCentiseconds / 100) % 60;
+  const centiseconds = totalCentiseconds % 100;
+  return `${hours.toString().padStart(2, "0")}${minutes.toString().padStart(2, "0")}${seconds.toString().padStart(2, "0")}.${centiseconds.toString().padStart(2, "0")}`;
+}
 
 for (let point = 0; point < totalPoints; point += 1) {
-  const seconds = point / frequencyHz;
-  // A smooth loop with small variations, roughly resembling a moving track.
-  const phase = seconds / 900 * 2 * Math.PI;
+  const timestamp = Math.floor(point * 1000 / frequencyHz);
+  const phase = timestamp / 900000 * 2 * Math.PI;
   const latitude = originLat + 0.012 * Math.sin(phase) + 0.002 * Math.sin(phase * 3);
   const longitude = originLon + 0.018 * Math.cos(phase) + 0.003 * Math.cos(phase * 2);
-  const timestamp = Math.floor(point * 1000 / frequencyHz);
-  const latitudeScaled = Math.round(latitude * 1e6);
-  const longitudeScaled = Math.round(longitude * 1e6);
-  lines.push(`${timestamp},${(latitudeScaled / 1e6).toFixed(6)},${(longitudeScaled / 1e6).toFixed(6)}\n`);
-  if (previousPoint === null) {
-    deltaLines.push(`${timestamp},${latitudeScaled},${longitudeScaled}\n`);
-  } else {
-    deltaLines.push(`${timestamp - previousPoint.timestamp},${latitudeScaled - previousPoint.latitude},${longitudeScaled - previousPoint.longitude}\n`);
-  }
-  previousPoint = { timestamp, latitude: latitudeScaled, longitude: longitudeScaled };
+  const time = nmeaTime(timestamp);
+  const latitudeDirection = latitude < 0 ? "S" : "N";
+  const longitudeDirection = longitude < 0 ? "W" : "E";
+  const latitudeField = nmeaCoordinate(latitude, true);
+  const longitudeField = nmeaCoordinate(longitude, false);
+
+  lines.push(nmeaSentence(
+    `GPRMC,${time},A,${latitudeField},${latitudeDirection},${longitudeField},${longitudeDirection},005.4,084.4,010126,,,A`,
+  ));
+  lines.push(nmeaSentence(
+    `GPGGA,${time},${latitudeField},${latitudeDirection},${longitudeField},${longitudeDirection},1,10,0.9,100.0,M,46.9,M,,`,
+  ));
 }
 
 const raw = Buffer.from(lines.join(""), "ascii");
-const delta = Buffer.from(deltaLines.join(""), "ascii");
-const decodedLines = [deltaLines[0]];
-let decodedPoint = null;
-for (const encodedLine of deltaLines.slice(1)) {
-  const [timeValue, latitudeValue, longitudeValue] = encodedLine.trim().split(",").map(Number);
-  if (decodedPoint === null) {
-    decodedPoint = { timestamp: timeValue, latitude: latitudeValue, longitude: longitudeValue };
-  } else {
-    decodedPoint.timestamp += timeValue;
-    decodedPoint.latitude += latitudeValue;
-    decodedPoint.longitude += longitudeValue;
-  }
-  decodedLines.push(`${decodedPoint.timestamp},${(decodedPoint.latitude / 1e6).toFixed(6)},${(decodedPoint.longitude / 1e6).toFixed(6)}\n`);
-}
-if (decodedLines.join("") !== lines.join("")) throw new Error("delta encoding verification failed");
 let crc32 = 0xFFFFFFFF;
 for (const byte of raw) {
   crc32 ^= byte;
@@ -73,9 +80,10 @@ for (const byte of raw) {
   }
 }
 crc32 = (~crc32) >>> 0;
-const deltaLiterals = [];
-for (let index = 0; index < delta.length; index += 120) {
-  deltaLiterals.push(JSON.stringify(delta.toString("ascii", index, index + 120)));
+
+const csvLiterals = [];
+for (let index = 0; index < raw.length; index += 120) {
+  csvLiterals.push(JSON.stringify(raw.toString("ascii", index, index + 120)));
 }
 
 const header = `#pragma once
@@ -84,11 +92,11 @@ const header = `#pragma once
 
 // Generated by tools/generate_route.js. Do not edit manually.
 static const uint32_t GPS_ROUTE_POINT_COUNT = ${totalPoints}UL;
+static const uint32_t GPS_ROUTE_LINE_COUNT = ${lines.length}UL;
 static const uint32_t GPS_ROUTE_RAW_SIZE = ${raw.length}UL;
 static const uint32_t GPS_ROUTE_CRC32 = 0x${crc32.toString(16).toUpperCase()}UL;
-static const uint32_t GPS_ROUTE_DELTA_SIZE = ${delta.length}UL;
-static const char GPS_ROUTE_DELTA[] PROGMEM =
-${deltaLiterals.join("\n")};
+static const char GPS_ROUTE_CSV[] PROGMEM =
+${csvLiterals.join("\n")};
 `;
 
 fs.mkdirSync(path.dirname(headerOutput), { recursive: true });
@@ -97,9 +105,8 @@ fs.writeFileSync(rawOutput, raw);
 fs.writeFileSync(headerOutput, header, "ascii");
 
 console.log(`points: ${totalPoints}`);
+console.log(`NMEA lines: ${lines.length}`);
 console.log(`raw: ${raw.length} bytes`);
-console.log(`delta: ${delta.length} bytes`);
-console.log(`compression ratio: ${(raw.length / delta.length).toFixed(2)}x`);
-console.log("delta verification: OK");
+console.log(`CRC32: ${crc32.toString(16).toUpperCase().padStart(8, "0")}`);
 console.log(`header: ${headerOutput}`);
 console.log(`raw file: ${rawOutput}`);

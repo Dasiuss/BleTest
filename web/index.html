@@ -8,7 +8,7 @@
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="icon" href="./icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="./styles.css">
-    <title>BLE GPS Transfer Test</title>
+    <title>BLE GPS Transfer Test v2</title>
   </head>
   <body>
     <main class="shell">
@@ -22,8 +22,8 @@
       </header>
 
       <section class="warning" id="browserWarning" hidden>
-        <strong>Web Bluetooth jest niedostępne.</strong>
-        Otwórz tę stronę w Chrome na Androidzie przez adres HTTPS z GitHub Pages.
+        <strong>Web Bluetooth lub dekompresja DEFLATE są niedostępne.</strong>
+        Otwórz tę stronę w aktualnym Chrome na Androidzie przez adres HTTPS z GitHub Pages.
       </section>
 
       <section class="control-panel panel">
@@ -32,7 +32,7 @@
             <p class="eyebrow">POŁĄCZENIE</p>
             <h2>Urządzenie BLE</h2>
           </div>
-          <span class="protocol-chip">NOTIFY TEST</span>
+          <span class="protocol-chip">NOTIFY TEST · v2</span>
         </div>
         <div class="controls">
           <button id="connectButton" class="button button-primary">Połącz urządzenie</button>
@@ -46,11 +46,11 @@
             <p class="eyebrow">TEST TRANSFERU</p>
             <h2>Archiwalna trasa GPS</h2>
           </div>
-          <span class="protocol-chip">NOTIFY · DELTA</span>
+          <span class="protocol-chip">NOTIFY · DEFLATE · v2</span>
         </div>
-        <p class="route-help">ESP32 przesyła różnice kolejnych punktów GPS strumieniem NOTIFY. PWA odtwarza z nich surowy CSV, potwierdza okna pakietów i żąda retransmisji po wykryciu brakującego fragmentu.</p>
+        <p class="route-help">ESP32 v2 kompresuje surowe wiersze NMEA algorytmem zlib/DEFLATE w pętli programu i przesyła je strumieniem NOTIFY. PWA dekompresuje dane do identycznego pliku CSV i pokazuje statystyki transferu.</p>
         <div class="controls">
-          <button id="routeStartButton" class="button button-primary" disabled>Pobierz trasę</button>
+          <button id="routeStartButton" class="button button-primary" disabled>Pobierz NMEA CSV</button>
           <button id="routeStopButton" class="button button-quiet" disabled>Zatrzymaj</button>
           <a id="routeDownloadLink" class="button button-secondary" hidden download="route-gps.csv">Pobierz CSV</a>
         </div>
@@ -75,7 +75,7 @@
       </section>
 
       <footer>
-        <span>BleTestEsp32</span>
+        <span>BleTestEsp32 · firmware v2 · PWA v2</span>
         <span>GATT route info · control · data</span>
       </footer>
     </main>
