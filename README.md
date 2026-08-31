@@ -7,7 +7,7 @@ Test BLE dla Waveshare ESP32-S3-Zero i telefonu z Androidem.
 - ESP32 reklamuje urządzenie BLE o nazwie `BleTestEsp32`.
 - Usługa GATT udostępnia metadane trasy, komendę sterującą oraz dane trasy przez `NOTIFY`.
 - ESP32 v4.1 przechowuje surowe wiersze NMEA w pamięci flash, kompresuje je strumieniowo zlib/DEFLATE w `loop()` i udostępnia przez BLE NOTIFY. Protokół pozostaje kompatybilny z v4.
-- PWA v4.1 dekompresuje dane do identycznego CSV, zapisuje transfer strumieniowo do OPFS, gdy przeglądarka je udostępnia, i raportuje profil czasowy całego transferu.
+- PWA v4.2 dekompresuje dane do identycznego CSV, zapisuje transfer strumieniowo do OPFS, gdy przeglądarka je udostępnia, i raportuje profil czasowy całego transferu. Przed podsumowaniem czeka również na zakończenie wszystkich zapisów ACK/NACK.
 - ESP32 ustawia lokalny MTU na 517; po negocjacji z telefonem payload ma do 240 bajtów zamiast 16 przy domyślnym MTU 23.
 
 ## Firmware w Arduino IDE
@@ -40,7 +40,7 @@ Web Bluetooth wymaga bezpiecznego kontekstu HTTPS. Lokalny plik `index.html` otw
 2. Otwórz PWA w Chrome. Nie paruj ESP32 wcześniej z poziomu ustawień Androida.
 3. Naciśnij **Połącz urządzenie** i wybierz `BleTestEsp32`.
 4. Naciśnij **Pobierz NMEA CSV**. PWA v4.1 włączy `NOTIFY`, wyśle `START`, a ESP32 v4.1 rozpocznie kompresję w `loop()`.
-5. Po zakończeniu PWA pokaże czas, liczbę pakietów, bitrate skompresowany, średni bitrate CSV, redukcję, CRC32, profil PWA i próbkę odebranego CSV. Dla dokładnego benchmarku pozostaw wyłączony szczegółowy log ramek.
+5. Po zakończeniu PWA v4.2 pokaże czas, liczbę pakietów, bitrate skompresowany, średni bitrate CSV, redukcję, CRC32, profil PWA i próbkę odebranego CSV. Dla dokładnego benchmarku pozostaw wyłączony szczegółowy log ramek.
 6. **Zatrzymaj** przerywa test. **Pobierz CSV** zapisuje odebrane dane.
 
 ## UUID

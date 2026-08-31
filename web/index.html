@@ -8,7 +8,7 @@
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="icon" href="./icon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="./styles.css">
-    <title>BLE GPS Transfer Test v4.1</title>
+    <title>BLE GPS Transfer Test v4.2</title>
   </head>
   <body>
     <main class="shell">
@@ -32,7 +32,7 @@
             <p class="eyebrow">POŁĄCZENIE</p>
             <h2>Urządzenie BLE</h2>
           </div>
-          <span class="protocol-chip">NOTIFY TEST · v4.1</span>
+          <span class="protocol-chip">NOTIFY TEST · v4.2</span>
         </div>
         <div class="controls">
           <button id="connectButton" class="button button-primary">Połącz urządzenie</button>
@@ -46,9 +46,9 @@
             <p class="eyebrow">TEST TRANSFERU</p>
             <h2>Archiwalna trasa GPS</h2>
           </div>
-          <span class="protocol-chip">NOTIFY · DEFLATE · v4.1</span>
+          <span class="protocol-chip">NOTIFY · DEFLATE · v4.2</span>
         </div>
-        <p class="route-help">ESP32 v4 kompresuje surowe wiersze NMEA algorytmem zlib/DEFLATE w pętli programu i przesyła je strumieniem NOTIFY. PWA v4.1 mierzy osobno BLE, dekompresję, ACK/NACK i zapis wyniku.</p>
+        <p class="route-help">ESP32 v4 kompresuje surowe wiersze NMEA algorytmem zlib/DEFLATE w pętli programu i przesyła je strumieniem NOTIFY. PWA v4.2 mierzy osobno BLE, dekompresję, ACK/NACK i zapis wyniku.</p>
         <div class="controls">
           <button id="routeStartButton" class="button button-primary" disabled>Pobierz NMEA CSV</button>
           <button id="routeStopButton" class="button button-quiet" disabled>Zatrzymaj</button>
@@ -76,7 +76,7 @@
       </section>
 
       <footer>
-        <span>BleTestEsp32 · firmware v4.1 · PWA v4.1</span>
+        <span>BleTestEsp32 · firmware v4.1 · PWA v4.2</span>
         <span>GATT route info · control · data</span>
       </footer>
     </main>

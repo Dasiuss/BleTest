@@ -1,4 +1,4 @@
-const APP_VERSION = "v4.1";
+const APP_VERSION = "v4.2";
 const PROTOCOL_VERSION = "v4";
 const SERVICE_UUID = "7e6d0001-7b9e-4f5b-a6c2-320000000001";
 const ROUTE_INFO_CHARACTERISTIC_UUID = "7e6d0006-7b9e-4f5b-a6c2-320000000006";
@@ -453,6 +453,7 @@ async function transferRoute() {
     routeTransferTimeout = setTimeout(() => rejectRouteTransfer(new Error("Timeout oczekiwania na koniec transferu")), 120000);
     await writeRouteCommand("START");
     await routeTransferPromise;
+    await routeControlWriteChain;
     await finishRouteTransfer();
   } catch (error) {
     if (routeStopRequested) {
