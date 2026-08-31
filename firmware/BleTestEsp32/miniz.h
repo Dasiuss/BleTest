@@ -718,7 +718,7 @@ extern "C"
 
 /* Set TDEFL_LESS_MEMORY to 1 to use less memory (compression will be slightly slower, and raw/dynamic blocks will be output more frequently). */
 #ifndef TDEFL_LESS_MEMORY
-#define TDEFL_LESS_MEMORY 0
+#define TDEFL_LESS_MEMORY 1
 #endif
 
     /* tdefl_init() compression flags logically OR'd together (low 12 bits contain the max. number of probes per dictionary search): */
