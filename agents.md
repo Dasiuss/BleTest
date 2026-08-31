@@ -26,7 +26,7 @@ Ostatni potwierdzony test sprzętowy użytkownika został wykonany na firmware
 - bitrate skompresowany: `30.5 KiB/s` (`249.6 kbit/s`),
 - brak `NACK`, retransmisji i błędów NimBLE.
 
-Firmware `v4.8` jest finalnym kandydatem z bezpośrednim sprawdzaniem mbufów
+Firmware `v4.9` jest finalnym kandydatem z bezpośrednim sprawdzaniem mbufów
 NimBLE przed wysłaniem. Został skompilowany, ale nie ma jeszcze potwierdzenia
 sprzętowego po tej zmianie. PWA `v4.9` jest zgodna z protokołem `v4` i została
 wypchnięta na `main` razem z dokumentacją; po zmianie opisu finalnego mechanizmu
@@ -58,9 +58,9 @@ Weryfikacja firmware:
 arduino-cli compile --fqbn esp32:esp32:esp32s3 firmware/BleTestEsp32
 ```
 
-Ostatni build firmware `v4.8`:
+Ostatni build firmware `v4.9`:
 
-- program: `669340 B` (`51%` z `1310720 B`),
+- program: `669480 B` (`51%` z `1310720 B`),
 - zmienne globalne: `227984 B` (`69%` z `327680 B`),
 - pozostały zapas RAM dla stosu i zmiennych lokalnych: `99696 B`.
 
@@ -96,7 +96,7 @@ sumami kontrolnymi NMEA. Bazowa trasa ma obecnie:
 - `1400` linii NMEA,
 - `100 100 B` surowego CSV.
 
-Firmware `v4.8` ma `ROUTE_TEST_REPEATS = 10`, więc w trybie testowym odczytuje
+Firmware `v4.9` ma `ROUTE_TEST_REPEATS = 10`, więc w trybie testowym odczytuje
 ten sam obszar flash dziesięć razy, tworząc logiczny wynik `1 001 000 B`. CRC,
 liczba punktów, liczba linii i rozmiar w `route info` dotyczą całego wyniku.
 Powtórzenia służą do wydłużenia testu; przyszły odczyt z karty SD nie będzie
@@ -190,7 +190,7 @@ produkcyjny, ponieważ:
 - wrapper tworzy mbuf przez `ble_hs_mbuf_from_flat()` bez udostępnienia stanu,
 - nie można bezpiecznie rozróżnić przyjęcia ramki od braku pamięci.
 
-Firmware `v4.8` używa bezpośrednio API NimBLE:
+Firmware `v4.9` używa bezpośrednio API NimBLE:
 
 ```text
 ble_hs_mbuf_from_flat(frame, length)
@@ -225,12 +225,15 @@ GATT. Ostatecznym sprawdzeniem jest wynik alokacji mbuf i wynik wysłania.
 Pacing pozostaje stały:
 
 ```text
-ROUTE_NOTIFY_INTERVAL_MS = 4
+ROUTE_NOTIFY_INTERVAL_MS = 8
 ```
 
-4 ms jest tylko minimalnym odstępem między próbami. Nie jest gwarancją, że
+8 ms jest stałym, sprawdzonym odstępem między próbami. Nie jest gwarancją, że
 NimBLE przyjmie ramkę. Kontrola zasobów odbywa się niezależnie przed każdym
-wysłaniem. Jeśli warunki radiowe się pogorszą, firmware może próbować później
+wysłaniem, ale sam licznik wolnych mbufów nie kontroluje czasu opróżniania
+wewnętrznej kolejki ATT. Przy 4 ms urządzenie nadal zgłaszało `rc=6` dokładnie
+przy obsłudze pierwszego ACK po sekwencji 32; przy 8 ms wcześniejsze testy były
+stabilne. Jeśli warunki radiowe się pogorszą, firmware może próbować później
 bez nadpisania pending frame; przy całkowitym zaniku połączenia transfer ma
 zakończyć się przez istniejące timeouty.
 
@@ -267,7 +270,7 @@ Firmware wypisuje po sukcesie:
 [PROFILE] ROUTE summary
 [PROFILE] total=... first_notify=... notify_span=...
 [PROFILE] compression=... calls=... max=...
-[PROFILE] notify=... calls=... avg=... max=... normal=... replay=... no_mbuf=... errors=... interval=4 ms
+[PROFILE] notify=... calls=... avg=... max=... normal=... replay=... no_mbuf=... errors=... interval=8 ms
 [PROFILE] ack=... nack=... timeouts=... replays=... ack_wait=...
 [PROFILE] output=... compressed_bytes=... notify_total=... repeats=...
 ```
@@ -365,6 +368,20 @@ Firmware `v4.5` przy 4 ms osiągnął:
 ustawionego minimum 4 ms. To wskazywało na harmonogram BLE/telefonu oraz
 kompresję, a nie na PWA.
 
+### Wersja v4.8 z rezerwą mbufów
+
+Dodanie sprawdzania `os_msys_num_free()` i rezerwy `6` bloków nie usunęło
+problemu. Przy pacingu 4 ms wystąpiło ponownie:
+
+```text
+NimBLE: ble_att_svr_pkt rc=6
+ROUTE ACK timeout; replay from sequence 32 (1/3)
+```
+
+To pokazuje, że próg wolnych mbufów nie jest wystarczającym regulatorem
+przepustowości ścieżki ATT. Wersja `v4.9` przywraca stały interwał `8 ms`,
+który wcześniej przechodził pełny test trasy `10x`.
+
 ## Wersjonowanie
 
 Wersja protokołu i wersja wydania są rozdzielone:
@@ -374,7 +391,7 @@ Wersja protokołu i wersja wydania są rozdzielone:
 - `APP_VERSION` - wersja PWA.
 
 PWA sprawdza `routeInfo.version` względem protokołu `v4`, a nie względem
-własnej wersji wydania. Dzięki temu PWA `v4.9` może działać z firmware `v4.8`.
+własnej wersji wydania. Dzięki temu PWA `v4.9` może działać z firmware `v4.9`.
 
 Po każdej zmianie PWA trzeba:
 
@@ -409,9 +426,9 @@ starego assetu. Pomaga pełne odświeżenie/reopen strony.
 - CI nie kompiluje szkicu Arduino.
 - Przy całkowitym zaniku połączenia istnieją timeouty ACK, ale nie ma osobnego raportu przyczyny na poziomie radia.
 
-## Następne kroki po walidacji v4.8
+## Następne kroki po walidacji v4.9
 
-1. Wgrać firmware `v4.8` i wykonać test trasy `10x` z PWA `v4.9`.
+1. Wgrać firmware `v4.9` i wykonać test trasy `10x` z PWA `v4.9`.
 2. Potwierdzić `no_mbuf=0`, `errors=0`, `nack=0` i poprawne CRC.
 3. Wymusić kontrolowane opóźnienie/zakłócenie i potwierdzić, że pending frame nie przesuwa sekwencji.
 4. Przetestować MTU 23, 247 i obecne MTU 517.
