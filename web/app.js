@@ -24,6 +24,7 @@ const els = {
   routeDownloadLink: $("routeDownloadLink"),
   eventLog: $("eventLog"),
   clearLogButton: $("clearLogButton"),
+  routeProtocolLog: $("routeProtocolLog"),
 };
 
 let device = null;
@@ -68,6 +69,10 @@ function log(message, type = "") {
   timeElement.textContent = time;
   entry.append(timeElement, document.createTextNode(message));
   els.eventLog.prepend(entry);
+}
+
+function protocolLog(message, type = "data") {
+  if (els.routeProtocolLog.checked) log(message, type);
 }
 
 function setConnection(state, label) {
@@ -182,7 +187,9 @@ function startRouteDecompressor() {
 
 function writeRouteCommand(command) {
   const value = new TextEncoder().encode(command);
-  const operation = routeControlWriteChain.catch(() => {}).then(() => routeControlCharacteristic.writeValue(value));
+  const operation = routeControlWriteChain.catch(() => {}).then(() => routeControlCharacteristic.writeValue(value)).then(() => {
+    protocolLog(`CONTROL WRITE: ${command}`);
+  });
   routeControlWriteChain = operation;
   return operation;
 }
@@ -217,6 +224,7 @@ function handleRouteNotification(event) {
   routeFrameCount += 1;
   const payload = new Uint8Array(value.buffer, value.byteOffset + ROUTE_FRAME_HEADER_SIZE, value.byteLength - ROUTE_FRAME_HEADER_SIZE).slice();
   if (routeFirstNotifyAt === 0) routeFirstNotifyAt = performance.now();
+  protocolLog(`NOTIFY #${sequence}: ${payload.byteLength} B${payload.byteLength === 0 ? " · KONIEC" : ""}`);
 
   if (payload.byteLength === 0) {
     routeTransferEndAt = performance.now();

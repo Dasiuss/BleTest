@@ -61,6 +61,8 @@ h2 { font-size: 21px; letter-spacing: -.02em; margin-bottom: 0; }
 .button-secondary { background: var(--cyan-dark); border-color: #27666b; color: var(--cyan); }
 .button-secondary:hover:not(:disabled) { background: #18535a; }
 .button-quiet { background: transparent; border-color: var(--line); color: var(--muted); }
+.protocol-log-toggle { align-items: center; color: var(--muted); display: inline-flex; font-size: 12px; gap: 8px; margin-top: 14px; }
+.protocol-log-toggle input { accent-color: var(--cyan); }
 .interval-control { align-items: center; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 18px; margin-top: 24px; padding-top: 19px; }
 .control-label { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .14em; margin: 0 0 5px; }
 .control-help { color: #65728a; font-size: 12px; margin: 0; }
