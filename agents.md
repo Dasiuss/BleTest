@@ -26,10 +26,11 @@ Ostatni potwierdzony test sprzętowy użytkownika został wykonany na firmware
 - bitrate skompresowany: `30.5 KiB/s` (`249.6 kbit/s`),
 - brak `NACK`, retransmisji i błędów NimBLE.
 
-Firmware `v4.7` jest finalnym kandydatem z bezpośrednim sprawdzaniem mbufów
+Firmware `v4.8` jest finalnym kandydatem z bezpośrednim sprawdzaniem mbufów
 NimBLE przed wysłaniem. Został skompilowany, ale nie ma jeszcze potwierdzenia
-sprzętowego po tej zmianie. PWA `v4.8` jest zgodna z protokołem `v4` i została
-wypchnięta na `main` razem z dokumentacją.
+sprzętowego po tej zmianie. PWA `v4.9` jest zgodna z protokołem `v4` i została
+wypchnięta na `main` razem z dokumentacją; po zmianie opisu finalnego mechanizmu
+bieżąca wersja PWA to `v4.9`.
 
 ## Najważniejsze pliki
 
@@ -57,7 +58,7 @@ Weryfikacja firmware:
 arduino-cli compile --fqbn esp32:esp32:esp32s3 firmware/BleTestEsp32
 ```
 
-Ostatni build firmware `v4.7`:
+Ostatni build firmware `v4.8`:
 
 - program: `669340 B` (`51%` z `1310720 B`),
 - zmienne globalne: `227984 B` (`69%` z `327680 B`),
@@ -95,7 +96,7 @@ sumami kontrolnymi NMEA. Bazowa trasa ma obecnie:
 - `1400` linii NMEA,
 - `100 100 B` surowego CSV.
 
-Firmware `v4.7` ma `ROUTE_TEST_REPEATS = 10`, więc w trybie testowym odczytuje
+Firmware `v4.8` ma `ROUTE_TEST_REPEATS = 10`, więc w trybie testowym odczytuje
 ten sam obszar flash dziesięć razy, tworząc logiczny wynik `1 001 000 B`. CRC,
 liczba punktów, liczba linii i rozmiar w `route info` dotyczą całego wyniku.
 Powtórzenia służą do wydłużenia testu; przyszły odczyt z karty SD nie będzie
@@ -189,15 +190,22 @@ produkcyjny, ponieważ:
 - wrapper tworzy mbuf przez `ble_hs_mbuf_from_flat()` bez udostępnienia stanu,
 - nie można bezpiecznie rozróżnić przyjęcia ramki od braku pamięci.
 
-Firmware `v4.7` używa bezpośrednio API NimBLE:
+Firmware `v4.8` używa bezpośrednio API NimBLE:
 
 ```text
 ble_hs_mbuf_from_flat(frame, length)
 ble_gatts_notify_custom(conn_handle, characteristic_handle, mbuf)
 ```
 
+Przed alokacją sprawdzane jest także `os_msys_num_free()`. Firmware utrzymuje
+`ROUTE_NIMBLE_MBUF_RESERVE = 6` wolnych bloków dla odpowiedzi ATT i innego ruchu
+BLE. Sam odczyt licznika nie jest traktowany jako gwarancja, ponieważ między
+sprawdzeniem a alokacją może wystąpić wyścig; dlatego zawsze sprawdzany jest
+również wynik `ble_hs_mbuf_from_flat()` i `ble_gatts_notify_custom()`.
+
 Reguły:
 
+- jeśli liczba wolnych bloków MSYS jest nie większa niż rezerwa, ramka pozostaje pending,
 - jeśli `ble_hs_mbuf_from_flat()` zwróci `nullptr`, ramka pozostaje pending,
 - jeśli `ble_gatts_notify_custom()` zwróci błąd, ramka pozostaje pending,
 - w żadnym z tych przypadków nie zwiększa się numer sekwencyjny,
@@ -241,6 +249,11 @@ Okno jest celowo większe od puli NimBLE, ponieważ nie służy do jej
 bezpośredniego zapełniania. Dzięki pending frame liczba przyjętych przez
 NimBLE mbufów jest ograniczona przez faktyczne zasoby stosu, a nie przez
 rozmiar naszego pierścienia.
+
+Rezerwa `6` nie jest utożsamiana z pełną pulą `MSYS_1`. W używanym pakiecie
+ESP32-S3 konfiguracja ma `12` bloków bazowych, port ESP32 dodaje zapas, a
+`MYNEWT_VAL_MSYS_1_BLOCK_COUNT` wynosi około `20`. Pula jest współdzielona,
+dlatego rezerwa jest konserwatywna i nadal weryfikowana wynikiem alokacji.
 
 Nie należy utożsamiać `inflight_chunks` z liczbą pakietów, które można
 bezwarunkowo przekazać do `notify()`. Każda próba musi przejść przez ścieżkę
@@ -361,7 +374,7 @@ Wersja protokołu i wersja wydania są rozdzielone:
 - `APP_VERSION` - wersja PWA.
 
 PWA sprawdza `routeInfo.version` względem protokołu `v4`, a nie względem
-własnej wersji wydania. Dzięki temu PWA `v4.8` może działać z firmware `v4.7`.
+własnej wersji wydania. Dzięki temu PWA `v4.9` może działać z firmware `v4.8`.
 
 Po każdej zmianie PWA trzeba:
 
@@ -396,9 +409,9 @@ starego assetu. Pomaga pełne odświeżenie/reopen strony.
 - CI nie kompiluje szkicu Arduino.
 - Przy całkowitym zaniku połączenia istnieją timeouty ACK, ale nie ma osobnego raportu przyczyny na poziomie radia.
 
-## Następne kroki po walidacji v4.7
+## Następne kroki po walidacji v4.8
 
-1. Wgrać firmware `v4.7` i wykonać test trasy `10x` z PWA `v4.8`.
+1. Wgrać firmware `v4.8` i wykonać test trasy `10x` z PWA `v4.9`.
 2. Potwierdzić `no_mbuf=0`, `errors=0`, `nack=0` i poprawne CRC.
 3. Wymusić kontrolowane opóźnienie/zakłócenie i potwierdzić, że pending frame nie przesuwa sekwencji.
 4. Przetestować MTU 23, 247 i obecne MTU 517.
