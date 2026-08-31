@@ -1,4 +1,4 @@
-const APP_VERSION = "v2";
+const APP_VERSION = "v3";
 const SERVICE_UUID = "7e6d0001-7b9e-4f5b-a6c2-320000000001";
 const ROUTE_INFO_CHARACTERISTIC_UUID = "7e6d0006-7b9e-4f5b-a6c2-320000000006";
 const ROUTE_CONTROL_CHARACTERISTIC_UUID = "7e6d0007-7b9e-4f5b-a6c2-320000000007";
@@ -38,6 +38,7 @@ let routeOutputBytes = 0;
 let routeFrameCount = 0;
 let routeExpectedSequence = 0;
 let routeLostFrames = 0;
+let routeLastDuplicateAckSequence = -1;
 let routeCrc32 = 0xFFFFFFFF;
 let routeStartedAt = 0;
 let routeFirstNotifyAt = 0;
@@ -209,7 +210,14 @@ function handleRouteNotification(event) {
 
   const view = new DataView(value.buffer, value.byteOffset, value.byteLength);
   const sequence = view.getUint32(0, true);
-  if (sequence < routeExpectedSequence) return;
+  if (sequence < routeExpectedSequence) {
+    protocolLog(`DUPLICATE NOTIFY #${sequence}`);
+    if (routeInfo.window_chunks && routeExpectedSequence % routeInfo.window_chunks === 0 && routeLastDuplicateAckSequence !== routeExpectedSequence) {
+      routeLastDuplicateAckSequence = routeExpectedSequence;
+      writeRouteCommand(`ACK:${routeExpectedSequence}`).catch(rejectRouteTransfer);
+    }
+    return;
+  }
   if (sequence > routeExpectedSequence) {
     routeLostFrames += sequence - routeExpectedSequence;
     routeRetryRequested = true;
@@ -318,6 +326,7 @@ async function transferRoute(retryAttempt = 0) {
   routeFrameCount = 0;
   routeExpectedSequence = 0;
   routeLostFrames = 0;
+  routeLastDuplicateAckSequence = -1;
   routeCrc32 = 0xFFFFFFFF;
   routeLineCount = 0;
   routePendingOutput = [];
