@@ -6,8 +6,8 @@ Test BLE dla Waveshare ESP32-S3-Zero i telefonu z Androidem.
 
 - ESP32 reklamuje urządzenie BLE o nazwie `BleTestEsp32`.
 - Usługa GATT udostępnia metadane trasy, komendę sterującą oraz dane trasy przez `NOTIFY`.
-- ESP32 v4.1 przechowuje surowe wiersze NMEA w pamięci flash, kompresuje je strumieniowo zlib/DEFLATE w `loop()` i udostępnia przez BLE NOTIFY. Protokół pozostaje kompatybilny z v4.
-- PWA v4.2 dekompresuje dane do identycznego CSV, zapisuje transfer strumieniowo do OPFS, gdy przeglądarka je udostępnia, i raportuje profil czasowy całego transferu. Przed podsumowaniem czeka również na zakończenie wszystkich zapisów ACK/NACK.
+- ESP32 v4.2 przechowuje surowe wiersze NMEA w pamięci flash, kompresuje je strumieniowo zlib/DEFLATE w `loop()` i udostępnia przez BLE NOTIFY. Protokół pozostaje kompatybilny z v4.
+- PWA v4.3 dekompresuje dane do identycznego CSV, zapisuje transfer strumieniowo do OPFS, gdy przeglądarka je udostępnia, i raportuje profil czasowy całego transferu. Przed podsumowaniem czeka również na zakończenie wszystkich zapisów ACK/NACK.
 - ESP32 ustawia lokalny MTU na 517; po negocjacji z telefonem payload ma do 240 bajtów zamiast 16 przy domyślnym MTU 23.
 
 ## Firmware w Arduino IDE
@@ -18,7 +18,7 @@ Test BLE dla Waveshare ESP32-S3-Zero i telefonu z Androidem.
 4. Ustaw port płytki i prędkość monitora portu szeregowego na `115200`.
 5. Wygeneruj dane trasy poleceniem `node tools/generate_route.js`.
 6. Wgraj program. Jeśli upload przez USB nie działa, włącz `USB CDC On Boot` albo użyj trybu bootloadera zgodnie z instrukcją Waveshare.
-7. Otwórz Serial Monitor. Powinien pojawić się komunikat `GPS route test v4.1` oraz `Advertising: BleTestEsp32`.
+7. Otwórz Serial Monitor. Powinien pojawić się komunikat `GPS route test v4.2` oraz `Advertising: BleTestEsp32`.
 
 Nie trzeba instalować dodatkowej biblioteki BLE. `BLEDevice` i `BLEServer` są częścią pakietu ESP32 dla Arduino.
 Kompresor `miniz` jest dołączony lokalnie w katalogu szkicu, więc nie wymaga osobnej instalacji w Arduino IDE.
@@ -39,8 +39,8 @@ Web Bluetooth wymaga bezpiecznego kontekstu HTTPS. Lokalny plik `index.html` otw
 1. Włącz Bluetooth i zasil ESP32.
 2. Otwórz PWA w Chrome. Nie paruj ESP32 wcześniej z poziomu ustawień Androida.
 3. Naciśnij **Połącz urządzenie** i wybierz `BleTestEsp32`.
-4. Naciśnij **Pobierz NMEA CSV**. PWA v4.1 włączy `NOTIFY`, wyśle `START`, a ESP32 v4.1 rozpocznie kompresję w `loop()`.
-5. Po zakończeniu PWA v4.2 pokaże czas, liczbę pakietów, bitrate skompresowany, średni bitrate CSV, redukcję, CRC32, profil PWA i próbkę odebranego CSV. Dla dokładnego benchmarku pozostaw wyłączony szczegółowy log ramek.
+4. Naciśnij **Pobierz NMEA CSV**. PWA v4.2 włączy `NOTIFY`, wyśle `START`, a ESP32 v4.2 rozpocznie kompresję w `loop()`.
+5. Po zakończeniu PWA v4.3 pokaże czas, liczbę pakietów, bitrate skompresowany, średni bitrate CSV, redukcję, CRC32, profil PWA i próbkę odebranego CSV. Dla dokładnego benchmarku pozostaw wyłączony szczegółowy log ramek.
 6. **Zatrzymaj** przerywa test. **Pobierz CSV** zapisuje odebrane dane.
 
 ## UUID
@@ -66,7 +66,7 @@ node tools/generate_route.js --duration-seconds 60 --frequency-hz 10
 
 Wynik jest surowym plikiem CSV zawierającym pełne zdania `GPRMC` i `GPGGA` zakończone `CRLF`, z poprawnymi sumami kontrolnymi NMEA. Firmware nie parsuje ani nie kompresuje danych w callbacku BLE: callback ustawia żądanie, a `loop()` odczytuje kolejne porcje z flash i zasila jeden ciąg zlib/DEFLATE. PWA używa `DecompressionStream("deflate")`, zapisuje zdekompresowany CSV do OPFS lub bufora `Blob` i weryfikuje CRC32.
 
-Wymiana MTU jest negocjacją obu stron. `BLEDevice::setMTU(517)` ustawia maksimum po stronie ESP32, ale klient GATT musi zainicjować wymianę. Ramka NOTIFY ma 4 bajty numeru sekwencyjnego i do 240 bajtów skompresowanego strumienia. ESP32 utrzymuje maksymalnie 16 ramek w locie, a PWA wysyła skumulowany `ACK:<next_sequence>` co 8 ramek, zwalniając kolejne sloty bez zatrzymywania kompresora. Przy luce PWA wysyła `NACK:<expected_sequence>`, a ESP32 powtarza niepotwierdzone ramki z bufora. Pusta ramka kończy transfer. Po transferze PWA weryfikuje rozmiar, liczbę linii i CRC32 odtworzonego pliku.
+Wymiana MTU jest negocjacją obu stron. `BLEDevice::setMTU(517)` ustawia maksimum po stronie ESP32, ale klient GATT musi zainicjować wymianę. Ramka NOTIFY ma 4 bajty numeru sekwencyjnego i do 240 bajtów skompresowanego strumienia. ESP32 utrzymuje maksymalnie 64 ramki w locie, a PWA wysyła skumulowany `ACK:<next_sequence>` co 32 ramki, zwalniając kolejne sloty bez zatrzymywania kompresora. Bufor ramek zajmuje około 16 KiB i nie ogranicza rozmiaru całego pliku, który jest przesyłany strumieniowo. Przy luce PWA wysyła `NACK:<expected_sequence>`, a ESP32 powtarza niepotwierdzone ramki z bufora. Pusta ramka kończy transfer. Po transferze PWA weryfikuje rozmiar, liczbę linii i CRC32 odtworzonego pliku.
 
 ## Profilowanie transferu
 
