@@ -1,4 +1,4 @@
-const APP_VERSION = "v4.3";
+const APP_VERSION = "v4.4";
 const PROTOCOL_VERSION = "v4";
 const SERVICE_UUID = "7e6d0001-7b9e-4f5b-a6c2-320000000001";
 const ROUTE_INFO_CHARACTERISTIC_UUID = "7e6d0006-7b9e-4f5b-a6c2-320000000006";
@@ -394,6 +394,7 @@ async function finishRouteTransfer() {
     `PWA: ${APP_VERSION} · protokół: ${PROTOCOL_VERSION} · firmware: ${routeInfo.firmware || routeInfo.version}`,
     `Punkty GPS: ${routeInfo.points.toLocaleString("pl-PL")}`,
     `Wiersze NMEA: ${routeLineCount.toLocaleString("pl-PL")}`,
+    `Powtórzenia testowe: ${routeInfo.repeats || 1}x`,
     `Pakiety NOTIFY: ${routeFrameCount.toLocaleString("pl-PL")}`,
   `Odzyskane luki ramek: ${routeLostFrames}`,
     `Pierwszy NOTIFY po: ${(firstNotifyDelay * 1000).toFixed(0)} ms`,
@@ -529,7 +530,7 @@ async function connect() {
     if (routeInfo.version !== PROTOCOL_VERSION || routeInfo.encoding !== "zlib-deflate") {
       throw new Error(`Nieobsługiwana wersja protokołu: ${routeInfo.version || "brak"}`);
     }
-    els.routeInfo.textContent = `${routeInfo.version} · firmware ${routeInfo.firmware || "?"} · ${routeInfo.points.toLocaleString("pl-PL")} punktów · ${routeInfo.lines.toLocaleString("pl-PL")} wierszy NMEA · ${formatBytes(routeInfo.raw_bytes)} CSV · zlib DEFLATE · MTU ${routeInfo.mtu} · fragment ${routeInfo.chunk_bytes} B · okno ${routeInfo.window_chunks}/${routeInfo.inflight_chunks || "?"}`;
+    els.routeInfo.textContent = `${routeInfo.version} · firmware ${routeInfo.firmware || "?"} · ${routeInfo.points.toLocaleString("pl-PL")} punktów · ${routeInfo.lines.toLocaleString("pl-PL")} wierszy NMEA · ${formatBytes(routeInfo.raw_bytes)} CSV · test ${routeInfo.repeats || 1}x · zlib DEFLATE · MTU ${routeInfo.mtu} · fragment ${routeInfo.chunk_bytes} B · okno ${routeInfo.window_chunks}/${routeInfo.inflight_chunks || "?"}`;
     setConnection("connected", "Połączono");
     setControls(true);
     log(`Gotowe: ${APP_VERSION}, surowy NMEA CSV przez NOTIFY`, "success");
