@@ -50,7 +50,7 @@ bieżąca wersja PWA to `v5`.
 - Arduino FQBN: `esp32:esp32:esp32s3`,
 - pakiet ESP32 używany podczas testów: `3.3.11`,
 - port używany podczas testów: `COM6`,
-- monitor szeregowy: `115200`.
+- monitor szeregowy: `115200`, uruchamiany jako `arduino-cli monitor --port COM6 --config baudrate=115200,dtr=off,rts=off --quiet`.
 
 Weryfikacja firmware:
 
@@ -60,13 +60,13 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3 firmware/BleTestEsp32
 
 Ostatni build firmware `v5`:
 
-- program: `669480 B` (`51%` z `1310720 B`),
-- zmienne globalne: `227984 B` (`69%` z `327680 B`),
-- pozostały zapas RAM dla stosu i zmiennych lokalnych: `99696 B`.
+- program: `670396 B` (`51%` z `1310720 B`),
+- zmienne globalne: `227976 B` (`69%` z `327680 B`),
+- pozostały zapas RAM dla stosu i zmiennych lokalnych: `99704 B`.
 
 Firmware jest wgrywany automatycznie po każdej zmianie firmware, zgodnie z
 ustaleniem użytkownika. Przed uploadem należy zwolnić `COM6`, a po uploadzie
-uruchomić w tle `arduino-cli monitor --port COM6`.
+uruchomić w tle `arduino-cli monitor --port COM6 --config baudrate=115200,dtr=off,rts=off --quiet`.
 
 ## Architektura GATT
 
@@ -382,7 +382,7 @@ Po każdej zmianie PWA trzeba:
 5. zacommitować i wypchnąć zmianę na `main`.
 
 Firmware jest wgrywany po każdej zmianie firmware i wymaga zwolnienia `COM6`
-przed uploadem. Po uploadzie monitor `arduino-cli monitor --port COM6` ma być
+przed uploadem. Po uploadzie monitor `arduino-cli monitor --port COM6 --config baudrate=115200,dtr=off,rts=off --quiet` ma być
 uruchomiony w tle.
 
 ## Deployment

@@ -15,7 +15,7 @@ Test BLE dla Waveshare ESP32-S3-Zero i telefonu z Androidem.
 1. W Arduino IDE zainstaluj pakiet płytek **esp32 by Espressif Systems**.
 2. Otwórz `firmware/BleTestEsp32/BleTestEsp32.ino`.
 3. Wybierz płytkę `ESP32S3 Dev Module` (Waveshare ESP32-S3-Zero nie musi mieć osobnej pozycji).
-4. Ustaw port płytki i prędkość monitora portu szeregowego na `115200`.
+4. Ustaw port płytki i prędkość monitora portu szeregowego na `115200`. W Arduino CLI użyj `arduino-cli monitor --port COM6 --config baudrate=115200,dtr=off,rts=off --quiet`.
 5. Wygeneruj dane trasy poleceniem `node tools/generate_route.js`.
 6. Wgraj program. Jeśli upload przez USB nie działa, włącz `USB CDC On Boot` albo użyj trybu bootloadera zgodnie z instrukcją Waveshare.
 7. Otwórz Serial Monitor. Powinien pojawić się komunikat `GPS route test v5` oraz `Advertising: BleTestEsp32`.
