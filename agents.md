@@ -47,26 +47,36 @@ bieżąca wersja PWA to `v5`.
 ## Sprzęt i kompilacja
 
 - płytka: Waveshare ESP32-S3-Zero,
-- Arduino FQBN: `esp32:esp32:esp32s3`,
+- Arduino FQBN: `esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc`,
 - pakiet ESP32 używany podczas testów: `3.3.11`,
 - port używany podczas testów: `COM6`,
-- monitor szeregowy: `115200`, uruchamiany jako `arduino-cli monitor --port COM6 --config baudrate=115200,dtr=off,rts=off --quiet`.
+- monitor szeregowy: `115200`, uruchamiany jako `arduino-cli monitor --port COM6 --config baudrate=115200,dtr=off,rts=off`.
 
 Weryfikacja firmware:
 
 ```text
-arduino-cli compile --fqbn esp32:esp32:esp32s3 firmware/BleTestEsp32
+arduino-cli compile --fqbn "esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc" firmware/BleTestEsp32
 ```
 
 Ostatni build firmware `v5`:
 
-- program: `670396 B` (`51%` z `1310720 B`),
-- zmienne globalne: `227976 B` (`69%` z `327680 B`),
-- pozostały zapas RAM dla stosu i zmiennych lokalnych: `99704 B`.
+- program: `694161 B` (`52%` z `1310720 B`),
+- zmienne globalne: `228696 B` (`69%` z `327680 B`),
+- pozostały zapas RAM dla stosu i zmiennych lokalnych: `98984 B`.
+
+Dla ESP32-S3 musi być włączone `CDCOnBoot=cdc`. Przy domyślnym profilu
+`esp32:esp32:esp32s3` upload przez USB-Serial/JTAG działa, ale `Serial` nie
+pojawia się na `COM6`, więc monitor pozostaje pusty. Po zmianie firmware należy
+zawsze używać pełnego FQBN powyżej zarówno przy kompilacji, jak i uploadzie.
+W `loop()` firmware ma heartbeat co sekundę, na przykład:
+
+```text
+[HEARTBEAT] loop alive t=18004 connected=0 active=0 pending=0 inflight=0
+```
 
 Firmware jest wgrywany automatycznie po każdej zmianie firmware, zgodnie z
 ustaleniem użytkownika. Przed uploadem należy zwolnić `COM6`, a po uploadzie
-uruchomić w tle `arduino-cli monitor --port COM6 --config baudrate=115200,dtr=off,rts=off --quiet`.
+uruchomić w tle `arduino-cli monitor --port COM6 --config baudrate=115200,dtr=off,rts=off`.
 
 ## Architektura GATT
 
@@ -382,7 +392,7 @@ Po każdej zmianie PWA trzeba:
 5. zacommitować i wypchnąć zmianę na `main`.
 
 Firmware jest wgrywany po każdej zmianie firmware i wymaga zwolnienia `COM6`
-przed uploadem. Po uploadzie monitor `arduino-cli monitor --port COM6 --config baudrate=115200,dtr=off,rts=off --quiet` ma być
+przed uploadem. Po uploadzie monitor `arduino-cli monitor --port COM6 --config baudrate=115200,dtr=off,rts=off` ma być
 uruchomiony w tle.
 
 ## Deployment
