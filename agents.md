@@ -26,11 +26,11 @@ Ostatni potwierdzony test sprzętowy użytkownika został wykonany na firmware
 - bitrate skompresowany: `30.5 KiB/s` (`249.6 kbit/s`),
 - brak `NACK`, retransmisji i błędów NimBLE.
 
-Firmware `v4.9` jest finalnym kandydatem z bezpośrednim sprawdzaniem mbufów
-NimBLE przed wysłaniem. Został skompilowany, ale nie ma jeszcze potwierdzenia
-sprzętowego po tej zmianie. PWA `v4.9` jest zgodna z protokołem `v4` i została
+Firmware `v5` jest kandydatem opartym na najszybszym potwierdzonym profilu
+z `BLECharacteristic::notify()`. Został skompilowany, ale nie ma jeszcze potwierdzenia
+sprzętowego po tej zmianie. PWA `v5` jest zgodna z protokołem `v4` i została
 wypchnięta na `main` razem z dokumentacją; po zmianie opisu finalnego mechanizmu
-bieżąca wersja PWA to `v4.9`.
+bieżąca wersja PWA to `v5`.
 
 ## Najważniejsze pliki
 
@@ -58,14 +58,15 @@ Weryfikacja firmware:
 arduino-cli compile --fqbn esp32:esp32:esp32s3 firmware/BleTestEsp32
 ```
 
-Ostatni build firmware `v4.9`:
+Ostatni build firmware `v5`:
 
 - program: `669480 B` (`51%` z `1310720 B`),
 - zmienne globalne: `227984 B` (`69%` z `327680 B`),
 - pozostały zapas RAM dla stosu i zmiennych lokalnych: `99696 B`.
 
-Firmware użytkownik wgrywa ręcznie przez Arduino IDE. Nie należy wykonywać
-automatycznego uploadu bez wyraźnej prośby.
+Firmware jest wgrywany automatycznie po każdej zmianie firmware, zgodnie z
+ustaleniem użytkownika. Przed uploadem należy zwolnić `COM6`, a po uploadzie
+uruchomić w tle `arduino-cli monitor --port COM6`.
 
 ## Architektura GATT
 
@@ -96,7 +97,7 @@ sumami kontrolnymi NMEA. Bazowa trasa ma obecnie:
 - `1400` linii NMEA,
 - `100 100 B` surowego CSV.
 
-Firmware `v4.9` ma `ROUTE_TEST_REPEATS = 10`, więc w trybie testowym odczytuje
+Firmware `v5` ma `ROUTE_TEST_REPEATS = 10`, więc w trybie testowym odczytuje
 ten sam obszar flash dziesięć razy, tworząc logiczny wynik `1 001 000 B`. CRC,
 liczba punktów, liczba linii i rozmiar w `route info` dotyczą całego wyniku.
 Powtórzenia służą do wydłużenia testu; przyszły odczyt z karty SD nie będzie
@@ -180,7 +181,7 @@ E (...) NimBLE: ble_att_svr_pkt rc=6
 
 W NimBLE `6` oznacza `BLE_HS_ENOMEM`.
 
-## Finalna kontrola wysyłania
+## Kontrola wysyłania
 
 Arduino `BLECharacteristic::notify()` jest niewystarczające jako interfejs
 produkcyjny, ponieważ:
@@ -190,52 +191,28 @@ produkcyjny, ponieważ:
 - wrapper tworzy mbuf przez `ble_hs_mbuf_from_flat()` bez udostępnienia stanu,
 - nie można bezpiecznie rozróżnić przyjęcia ramki od braku pamięci.
 
-Firmware `v4.9` używa bezpośrednio API NimBLE:
+Wydanie V5 wraca do sprawdzonej ścieżki Arduino BLE:
 
 ```text
-ble_hs_mbuf_from_flat(frame, length)
-ble_gatts_notify_custom(conn_handle, characteristic_handle, mbuf)
+routeDataCharacteristic->setValue(frame, frameLength)
+routeDataCharacteristic->notify()
 ```
 
-Przed alokacją sprawdzane jest także `os_msys_num_free()`. Firmware utrzymuje
-`ROUTE_NIMBLE_MBUF_RESERVE = 6` wolnych bloków dla odpowiedzi ATT i innego ruchu
-BLE. Sam odczyt licznika nie jest traktowany jako gwarancja, ponieważ między
-sprawdzeniem a alokacją może wystąpić wyścig; dlatego zawsze sprawdzany jest
-również wynik `ble_hs_mbuf_from_flat()` i `ble_gatts_notify_custom()`.
-
-Reguły:
-
-- jeśli liczba wolnych bloków MSYS jest nie większa niż rezerwa, ramka pozostaje pending,
-- jeśli `ble_hs_mbuf_from_flat()` zwróci `nullptr`, ramka pozostaje pending,
-- jeśli `ble_gatts_notify_custom()` zwróci błąd, ramka pozostaje pending,
-- w żadnym z tych przypadków nie zwiększa się numer sekwencyjny,
-- nie zwiększa się liczba ramek in-flight,
-- skompresowany payload pozostaje w buforze ramki,
-- kolejna próba następuje po normalnym interwale pacingu,
-- `ble_gatts_notify_custom()` zużywa mbuf także przy błędzie, więc nie wolno
-  zwalniać go drugi raz.
-
-`BLECharacteristic::getHandle()` i `BLEServer::getConnId()` są publicznie
-dostępne i wystarczają do tego wywołania dla jednego połączenia.
-
-Nie używamy prywatnego `ble_hs_hci_avail_pkts` jako głównego mechanizmu. Jest
-to informacja o kredytach kontrolera, a nie pełny obraz dostępności mbufów
-GATT. Ostatecznym sprawdzeniem jest wynik alokacji mbuf i wynik wysłania.
+Ta ścieżka nie zwraca wyniku przyjęcia przez NimBLE. Stabilność zapewnia
+sprawdzony stały pacing, a bufor okna i ACK/NACK nadal zapewniają odzyskiwanie
+ramek utraconych radiowo.
 
 Pacing pozostaje stały:
 
 ```text
-ROUTE_NOTIFY_INTERVAL_MS = 8
+ROUTE_NOTIFY_INTERVAL_MS = 4
 ```
 
-8 ms jest stałym, sprawdzonym odstępem między próbami. Nie jest gwarancją, że
-NimBLE przyjmie ramkę. Kontrola zasobów odbywa się niezależnie przed każdym
-wysłaniem, ale sam licznik wolnych mbufów nie kontroluje czasu opróżniania
-wewnętrznej kolejki ATT. Przy 4 ms urządzenie nadal zgłaszało `rc=6` dokładnie
-przy obsłudze pierwszego ACK po sekwencji 32; przy 8 ms wcześniejsze testy były
-stabilne. Jeśli warunki radiowe się pogorszą, firmware może próbować później
-bez nadpisania pending frame; przy całkowitym zaniku połączenia transfer ma
-zakończyć się przez istniejące timeouty.
+4 ms jest najszybszym potwierdzonym odstępem między próbami. Nie jest
+gwarancją, że NimBLE przyjmie ramkę, ale profil V4.5 przeszedł pełny test bez
+błędów, NACK i retransmisji. Jeśli warunki radiowe się pogorszą, bufor okna
+oraz ACK/NACK obsługują utratę ramek; przy całkowitym zaniku połączenia transfer
+ma zakończyć się przez istniejące timeouty.
 
 ## Okno i pamięć
 
@@ -248,19 +225,17 @@ ROUTE_MAX_FRAME_SIZE = 244
 ```
 
 128 slotów używa około `32 KiB`, a build pozostawia około `100 KiB` zapasu.
-Okno jest celowo większe od puli NimBLE, ponieważ nie służy do jej
-bezpośredniego zapełniania. Dzięki pending frame liczba przyjętych przez
-NimBLE mbufów jest ograniczona przez faktyczne zasoby stosu, a nie przez
-rozmiar naszego pierścienia.
+Okno przechowuje kopie ramek potrzebne do retransmisji i nie ogranicza rozmiaru
+całego pliku. V5 nie próbuje sterować tempem przez licznik puli NimBLE; stabilność
+zapewnia stały pacing `4 ms`, a ACK/NACK i bufor okna obsługują utratę ramek.
 
-Rezerwa `6` nie jest utożsamiana z pełną pulą `MSYS_1`. W używanym pakiecie
-ESP32-S3 konfiguracja ma `12` bloków bazowych, port ESP32 dodaje zapas, a
-`MYNEWT_VAL_MSYS_1_BLOCK_COUNT` wynosi około `20`. Pula jest współdzielona,
-dlatego rezerwa jest konserwatywna i nadal weryfikowana wynikiem alokacji.
+Wersja `v4.8` próbowała zachować rezerwę `6` bloków MSYS, ale nie poprawiło to
+stabilności. V5 nie używa tego licznika jako regulatora, ponieważ nie opisuje
+czasu opróżniania wewnętrznej kolejki ATT.
 
 Nie należy utożsamiać `inflight_chunks` z liczbą pakietów, które można
-bezwarunkowo przekazać do `notify()`. Każda próba musi przejść przez ścieżkę
-kontrolowaną.
+bezwarunkowo przekazać do `notify()`. V5 polega na sprawdzonym stałym pacingu,
+a odzyskiwanie utraconych ramek zapewniają ACK/NACK i bufor okna.
 
 ## Profilowanie
 
@@ -270,7 +245,7 @@ Firmware wypisuje po sukcesie:
 [PROFILE] ROUTE summary
 [PROFILE] total=... first_notify=... notify_span=...
 [PROFILE] compression=... calls=... max=...
-[PROFILE] notify=... calls=... avg=... max=... normal=... replay=... no_mbuf=... errors=... interval=8 ms
+[PROFILE] notify=... calls=... avg=... max=... normal=... replay=... interval=4 ms
 [PROFILE] ack=... nack=... timeouts=... replays=... ack_wait=...
 [PROFILE] output=... compressed_bytes=... notify_total=... repeats=...
 ```
@@ -278,9 +253,7 @@ Firmware wypisuje po sukcesie:
 Znaczenie:
 
 - `compression` - czas CPU w `tdefl_compress`; nie jest to cały czas transferu.
-- `notify` - koszt kontrolowanej próby alokacji mbuf i przekazania ramki do NimBLE.
-- `no_mbuf` - próba zatrzymana przed wywołaniem GATT z powodu braku mbufa.
-- `errors` - niezerowy wynik `ble_gatts_notify_custom()`.
+- `notify` - koszt wywołań `setValue()` i `notify()`.
 - `notify_span` - czas od pierwszej przyjętej ramki do end markeru.
 - `ack_wait` - czas oczekiwania na ACK po rozpoczęciu bloków.
 - `nack` i `replays` - odzyskiwanie utraconych ramek.
@@ -379,8 +352,15 @@ ROUTE ACK timeout; replay from sequence 32 (1/3)
 ```
 
 To pokazuje, że próg wolnych mbufów nie jest wystarczającym regulatorem
-przepustowości ścieżki ATT. Wersja `v4.9` przywraca stały interwał `8 ms`,
-który wcześniej przechodził pełny test trasy `10x`.
+przepustowości ścieżki ATT. Wersja `v5` wraca do najszybszego profilu `4 ms`,
+który w wydaniu `v4.5` przechodził pełny test trasy `10x`.
+
+### Wydanie V5
+
+V5 wraca do najszybszego potwierdzonego profilu: protokół wire `v4`,
+ciągły zlib/DEFLATE, ramka `244 B` z payloadem `240 B`, okno `128`, ACK co
+`32` ramki i stały odstęp NOTIFY `4 ms`. Ten profil osiągnął około `30.5 KiB/s`
+przy `0` błędów, `0` NACK i `0` retransmisji w potwierdzonym teście `v4.5`.
 
 ## Wersjonowanie
 
@@ -391,7 +371,7 @@ Wersja protokołu i wersja wydania są rozdzielone:
 - `APP_VERSION` - wersja PWA.
 
 PWA sprawdza `routeInfo.version` względem protokołu `v4`, a nie względem
-własnej wersji wydania. Dzięki temu PWA `v4.9` może działać z firmware `v4.9`.
+własnej wersji wydania. Dzięki temu PWA `v5` może działać z firmware `v5`.
 
 Po każdej zmianie PWA trzeba:
 
@@ -401,8 +381,9 @@ Po każdej zmianie PWA trzeba:
 4. wykonać `node --check web/app.js`,
 5. zacommitować i wypchnąć zmianę na `main`.
 
-Firmware użytkownik wgrywa ręcznie i nie wymaga osobnego commita, chyba że
-jest to jawnie potrzebne.
+Firmware jest wgrywany po każdej zmianie firmware i wymaga zwolnienia `COM6`
+przed uploadem. Po uploadzie monitor `arduino-cli monitor --port COM6` ma być
+uruchomiony w tle.
 
 ## Deployment
 
@@ -422,14 +403,14 @@ starego assetu. Pomaga pełne odświeżenie/reopen strony.
 - Testowe `ROUTE_TEST_REPEATS = 10` jest specjalnym trybem benchmarkowym.
 - `ROUTE_MAX_FRAME_SIZE = 244`, mimo MTU 517; większe ramki wymagają osobnego testu.
 - Nie ma jeszcze pełnych testów na wielu modelach Androida, Chrome i MTU 23.
-- Bezpośrednia ścieżka NimBLE jest finalnym kandydatem, ale wymaga potwierdzenia sprzętowego po wgraniu.
+- Ścieżka `BLECharacteristic::notify()` nie zwraca wyniku przyjęcia przez NimBLE; stabilność V5 opiera się na potwierdzonym pacingu `4 ms`.
 - CI nie kompiluje szkicu Arduino.
 - Przy całkowitym zaniku połączenia istnieją timeouty ACK, ale nie ma osobnego raportu przyczyny na poziomie radia.
 
-## Następne kroki po walidacji v4.9
+## Następne kroki po walidacji v5
 
-1. Wgrać firmware `v4.9` i wykonać test trasy `10x` z PWA `v4.9`.
-2. Potwierdzić `no_mbuf=0`, `errors=0`, `nack=0` i poprawne CRC.
+1. Wgrać firmware `v5` i wykonać test trasy `10x` z PWA `v5`.
+2. Potwierdzić brak błędów NimBLE, `nack=0`, `timeouts=0` i poprawne CRC.
 3. Wymusić kontrolowane opóźnienie/zakłócenie i potwierdzić, że pending frame nie przesuwa sekwencji.
 4. Przetestować MTU 23, 247 i obecne MTU 517.
 5. Zmierzyć większy rozmiar payloadu, np. 480-500 B, jako osobny eksperyment.

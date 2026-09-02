@@ -3,16 +3,10 @@
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
-#if defined(CONFIG_NIMBLE_ENABLED)
-#include <host/ble_gatt.h>
-#include <host/ble_hs_mbuf.h>
-#else
-#error "BleTestEsp32 requires CONFIG_NIMBLE_ENABLED for controlled notifications"
-#endif
 #include "miniz.h"
 #include "route_data.h"
 
-static const char *FIRMWARE_VERSION = "v4.9";
+static const char *FIRMWARE_VERSION = "v5";
 static const char *ROUTE_PROTOCOL_VERSION = "v4";
 static const char *SERVICE_UUID = "7e6d0001-7b9e-4f5b-a6c2-320000000001";
 static const char *ROUTE_INFO_CHARACTERISTIC_UUID = "7e6d0006-7b9e-4f5b-a6c2-320000000006";
@@ -26,9 +20,8 @@ static const uint16_t ROUTE_INPUT_BUFFER_SIZE = 512;
 static const uint8_t ROUTE_NOTIFY_ACK_BLOCK_SIZE = 32;
 static const uint8_t ROUTE_NOTIFY_WINDOW_SIZE = 128;
 static const uint8_t ROUTE_TEST_REPEATS = 10;
-// 8 ms is the tested static pacing interval for ATT/Android queue turnover.
-static const uint32_t ROUTE_NOTIFY_INTERVAL_MS = 8;
-static const uint16_t ROUTE_NIMBLE_MBUF_RESERVE = 6;
+// 4 ms is the fastest confirmed stable pacing profile.
+static const uint32_t ROUTE_NOTIFY_INTERVAL_MS = 4;
 static const uint32_t ROUTE_ACK_TIMEOUT_MS = 500;
 static const uint8_t ROUTE_ACK_RETRY_LIMIT = 3;
 
@@ -83,9 +76,6 @@ uint32_t routeProfileCompressionMaxUs = 0;
 uint32_t routeProfileNotifyUs = 0;
 uint32_t routeProfileNotifyCalls = 0;
 uint32_t routeProfileNotifyMaxUs = 0;
-uint32_t routeProfileNotifyErrors = 0;
-uint32_t routeProfileNotifyNoMbuf = 0;
-uint16_t routeProfileMbufMinFree = UINT16_MAX;
 uint32_t routeProfileNormalFrames = 0;
 uint32_t routeProfileReplayFrames = 0;
 uint32_t routeProfileAckCount = 0;
@@ -187,9 +177,6 @@ void resetRouteCompression() {
   routeProfileNotifyUs = 0;
   routeProfileNotifyCalls = 0;
   routeProfileNotifyMaxUs = 0;
-  routeProfileNotifyErrors = 0;
-  routeProfileNotifyNoMbuf = 0;
-  routeProfileMbufMinFree = UINT16_MAX;
   routeProfileNormalFrames = 0;
   routeProfileReplayFrames = 0;
   routeProfileAckCount = 0;
@@ -281,34 +268,8 @@ void recordRouteNotifyAttempt(uint32_t startedUs) {
 
 bool notifyRouteFrame(const uint8_t *frame, uint16_t frameLength) {
   uint32_t startedUs = micros();
-  int freeMbufs = os_msys_num_free();
-  if (freeMbufs >= 0 && freeMbufs < routeProfileMbufMinFree) {
-    routeProfileMbufMinFree = (uint16_t)freeMbufs;
-  }
-  if (freeMbufs >= 0 && freeMbufs <= ROUTE_NIMBLE_MBUF_RESERVE) {
-    routeProfileNotifyNoMbuf += 1;
-    recordRouteNotifyAttempt(startedUs);
-    routeLastNotifyAt = millis();
-    return false;
-  }
-  struct os_mbuf *mbuf = ble_hs_mbuf_from_flat(frame, frameLength);
-  if (mbuf == nullptr) {
-    routeProfileNotifyNoMbuf += 1;
-    recordRouteNotifyAttempt(startedUs);
-    routeLastNotifyAt = millis();
-    return false;
-  }
-  int rc = ble_gatts_notify_custom(
-      bleServer->getConnId(),
-      routeDataCharacteristic->getHandle(),
-      mbuf);
-  if (rc != 0) {
-    routeProfileNotifyErrors += 1;
-    recordRouteNotifyAttempt(startedUs);
-    Serial.printf("[BLE] ROUTE NOTIFY rejected by NimBLE: rc=%d\n", rc);
-    routeLastNotifyAt = millis();
-    return false;
-  }
+  routeDataCharacteristic->setValue(frame, frameLength);
+  routeDataCharacteristic->notify();
   recordRouteNotifyAttempt(startedUs);
   if (routeProfileFirstNotifyUs == 0) routeProfileFirstNotifyUs = micros();
   routeNotifyCount += 1;
@@ -484,18 +445,14 @@ void printRouteProfile() {
                 (unsigned long)routeProfileCompressionUs,
                 (unsigned long)routeProfileCompressionCalls,
                 (unsigned long)routeProfileCompressionMaxUs);
-  Serial.printf("[PROFILE] notify=%lu us calls=%lu avg=%lu us max=%lu us normal=%lu replay=%lu no_mbuf=%lu errors=%lu msys_free_min=%u reserve=%u interval=%lu ms\n",
+  Serial.printf("[PROFILE] notify=%lu us calls=%lu avg=%lu us max=%lu us normal=%lu replay=%lu interval=%lu ms\n",
                 (unsigned long)routeProfileNotifyUs,
                 (unsigned long)routeProfileNotifyCalls,
                 (unsigned long)(routeProfileNotifyCalls ? routeProfileNotifyUs / routeProfileNotifyCalls : 0),
                 (unsigned long)routeProfileNotifyMaxUs,
                 (unsigned long)routeProfileNormalFrames,
                 (unsigned long)routeProfileReplayFrames,
-                (unsigned long)routeProfileNotifyNoMbuf,
-                (unsigned long)routeProfileNotifyErrors,
-                (unsigned int)(routeProfileMbufMinFree == UINT16_MAX ? 0 : routeProfileMbufMinFree),
-                (unsigned int)ROUTE_NIMBLE_MBUF_RESERVE,
-                (unsigned long)ROUTE_NOTIFY_INTERVAL_MS);
+                 (unsigned long)ROUTE_NOTIFY_INTERVAL_MS);
   Serial.printf("[PROFILE] ack=%lu nack=%lu timeouts=%lu replays=%lu ack_wait=%lu ms\n",
                 (unsigned long)routeProfileAckCount,
                 (unsigned long)routeProfileNackCount,
