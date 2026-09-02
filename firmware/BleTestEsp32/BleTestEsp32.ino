@@ -614,18 +614,6 @@ void setup() {
 }
 
 void loop() {
-  static uint32_t lastHeartbeatAt = 0;
-  uint32_t now = millis();
-  if ((uint32_t)(now - lastHeartbeatAt) >= 1000) {
-    lastHeartbeatAt = now;
-    Serial.printf("[HEARTBEAT] loop alive t=%lu connected=%u active=%u pending=%u inflight=%u\n",
-                  (unsigned long)now,
-                  deviceConnected ? 1U : 0U,
-                  routeTransferActive ? 1U : 0U,
-                  routePendingNotify ? 1U : 0U,
-                  (unsigned int)routeInFlightCount);
-  }
-
   if (routeStartRequested) {
     routeStartRequested = false;
     routeStartedAt = millis();

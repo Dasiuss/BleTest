@@ -60,20 +60,14 @@ arduino-cli compile --fqbn "esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc" fir
 
 Ostatni build firmware `v5`:
 
-- program: `694161 B` (`52%` z `1310720 B`),
-- zmienne globalne: `228696 B` (`69%` z `327680 B`),
-- pozostały zapas RAM dla stosu i zmiennych lokalnych: `98984 B`.
+- program: `694017 B` (`52%` z `1310720 B`),
+- zmienne globalne: `228688 B` (`69%` z `327680 B`),
+- pozostały zapas RAM dla stosu i zmiennych lokalnych: `98992 B`.
 
 Dla ESP32-S3 musi być włączone `CDCOnBoot=cdc`. Przy domyślnym profilu
 `esp32:esp32:esp32s3` upload przez USB-Serial/JTAG działa, ale `Serial` nie
 pojawia się na `COM6`, więc monitor pozostaje pusty. Po zmianie firmware należy
 zawsze używać pełnego FQBN powyżej zarówno przy kompilacji, jak i uploadzie.
-W `loop()` firmware ma heartbeat co sekundę, na przykład:
-
-```text
-[HEARTBEAT] loop alive t=18004 connected=0 active=0 pending=0 inflight=0
-```
-
 Firmware jest wgrywany automatycznie po każdej zmianie firmware, zgodnie z
 ustaleniem użytkownika. Przed uploadem należy zwolnić `COM6`, a po uploadzie
 uruchomić w tle `arduino-cli monitor --port COM6 --config baudrate=115200,dtr=off,rts=off`.
